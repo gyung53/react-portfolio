@@ -1,13 +1,64 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>react-portfolio</title>
-  </head>
+    <title>KAKYUNG KIM - Work</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#9333EA', // Purple-600
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            keyframes: {
+              fadeInDown: {
+                '0%': { opacity: '0', transform: 'translateY(-20px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              slideInLeft: {
+                '0%': { opacity: '0', transform: 'translate(-100px, -50%)' },
+                '100%': { opacity: '1', transform: 'translate(0, -50%)' },
+              },
+              slideInRight: {
+                '0%': { opacity: '0', transform: 'translate(100px, -50%)' },
+                '100%': { opacity: '1', transform: 'translate(0, -50%)' },
+              }
+            },
+            animation: {
+              fadeInDown: 'fadeInDown 0.8s ease forwards',
+              slideInLeft: 'slideInLeft 1s ease 0.3s both',
+              slideInRight: 'slideInRight 1s ease 0.5s both',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 5px; }
+      ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "three/": "https://aistudiocdn.com/three@^0.181.2/",
+    "three": "https://aistudiocdn.com/three@^0.181.2",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+    <script type="module" src="/src/index.tsx"></script>
+</body>
 </html>
