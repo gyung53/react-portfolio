@@ -78,7 +78,6 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
         <div className="w-full max-h-[80vh] overflow-y-auto bg-white/95 backdrop-blur-md rounded-[20px] shadow-2xl p-[30px] pointer-events-auto">
           <div className="flex justify-between items-center mb-5">
             <h2 className="text-base font-bold text-primary tracking-wider">PLAYLIST</h2>
-            <button className="text-xl p-1 text-black hover:text-primary hover:scale-110 transition-all">✕</button>
           </div>
           <ul className="flex flex-col gap-3 list-none">
             {PROJECTS.map(p => (

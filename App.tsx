@@ -6,13 +6,25 @@ import LoadingScreen from './components/LoadingScreen';
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
+  const [isNavTextWhite, setIsNavTextWhite] = useState(false); // State for header text color
   const location = useLocation();
   const isWork = location.pathname === '/' || location.pathname === '/work';
   const isInfo = location.pathname === '/info';
 
+  // Reset nav color when changing routes
+  React.useEffect(() => {
+    if (!isInfo) {
+      setIsNavTextWhite(false);
+    }
+  }, [location.pathname, isInfo]);
+
   if (isLoading) {
     return <LoadingScreen onComplete={() => setIsLoading(false)} />;
   }
+
+  const headerTextColor = isNavTextWhite ? 'text-white' : 'text-black';
+  const navInactiveColor = isNavTextWhite ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black';
+  const navActiveBorder = isNavTextWhite ? 'border-white' : 'border-black';
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-white relative animate-fadeInDown">
@@ -20,30 +32,30 @@ function App() {
       {/* --- Common Layout Elements --- */}
 
       {/* Header / Logo */}
-      <div className="fixed top-5 left-20 z-50">
-        <h1 className="text-5xl font-bold tracking-widest text-black">
-            <Link to="/">KIMKAKYUNG</Link>
+      <div className="fixed top-5 left-8 md:left-20 z-50 transition-colors duration-300">
+        <h1 className={`text-3xl md:text-5xl font-bold tracking-widest ${headerTextColor}`}>
+            <Link to="/">KAKYUNG KIM</Link>
         </h1>
       </div>
 
       {/* Navigation Tabs */}
-      <nav className="fixed top-10 right-20 flex gap-5 z-50">
+      <nav className="fixed top-8 md:top-10 right-8 md:right-20 flex gap-5 z-50 transition-colors duration-300">
         <Link 
             to="/info" 
-            className={`px-6 py-3 text-base font-semibold transition-colors duration-300 ${
+            className={`px-3 md:px-6 py-2 md:py-3 text-sm md:text-base font-semibold transition-all duration-300 ${
                 isInfo 
-                ? 'text-black border-b-2 border-black' 
-                : 'text-gray-400 hover:text-black'
+                ? `${headerTextColor} border-b-2 ${navActiveBorder}` 
+                : navInactiveColor
             }`}
         >
             INFO
         </Link>
         <Link 
             to="/" 
-            className={`px-6 py-3 text-base font-semibold transition-colors duration-300 ${
+            className={`px-3 md:px-6 py-2 md:py-3 text-sm md:text-base font-semibold transition-all duration-300 ${
                 isWork 
-                ? 'text-black border-b-2 border-black' 
-                : 'text-gray-400 hover:text-black'
+                ? `${headerTextColor} border-b-2 ${navActiveBorder}` 
+                : navInactiveColor
             }`}
         >
             WORK
@@ -54,7 +66,10 @@ function App() {
       <Routes>
         <Route path="/" element={<WorkPage />} />
         <Route path="/work" element={<WorkPage />} />
-        <Route path="/info" element={<InfoPage />} />
+        <Route 
+          path="/info" 
+          element={<InfoPage onThemeChange={setIsNavTextWhite} />} 
+        />
       </Routes>
       
     </div>
