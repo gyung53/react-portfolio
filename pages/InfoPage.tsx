@@ -30,13 +30,13 @@ const RESUME_DATA = {
     desc3: [
       "이 서랍장에 담긴 음반들은",
       "명반처럼 세련되지는 않았을 지 모릅니다.",
-      "하지만 사용자의 일상에 가장 편안한 멜로디, 익",
-      "숙한 멜로디로 스며들기 위해 끊임없이",
+      "하지만 사용자의 일상에 가장 편안한 멜로디,",
+      "익숙한 멜로디로 스며들기 위해 끊임없이",
       "고민하고 다듬어온 과정, 그 자체입니다."
     ],
     advantages: [
-        "# Passionate", "#djkfsjklfksdjf",
-        "#djkfsjklfksdjf", "#djkfsjklfksdjf"
+        "# Enthusiastic", "# Responsible",
+        "# Adaptable", "# Leadership-oriented"
     ],
     contact: {
       insta: "@gyung53",
@@ -49,7 +49,7 @@ const RESUME_DATA = {
     design: [
       {
         title: 'Illustrator',
-        desc: '아이콘, 로고, 그래픽 일러스트 등\n벡터기반의 그래픽을 제작할 때\n사용합니다. 확대/축소에도 화질이\n깨지지 않는 선명한 결과물이 필요\n할 때 주로 활용합니다.',
+        desc: '아이콘, 로고, 그래픽 일러스트 등\n벡터기반의 그래픽을 제작할 때\n사용합니다. 확대/축소에도 화질이\n깨지지 않는 선명한 결과물이\n 필요할 때 주로 활용합니다.',
         sub: 'It is used for creating\nvector-based graphics such as\nicons, logos, and illustrations.'
       },
       {
@@ -64,7 +64,7 @@ const RESUME_DATA = {
       },
       {
         title: 'After Effects',
-        desc: '모션그래픽 등 영상을 제작할 수 있는\n툴로서, 주로 UI 디자인 시안이나\n서비스의 핵심 기능을 소개하는 홍보\n영상을 제작할 때 활용합니다.',
+        desc: '모션그래픽 등 영상을 제작할 수 있는\n툴로서, 주로 UI 디자인 시안이나\n서비스의 핵심 기능을 소개하는 \n홍보영상을 제작할 때 활용합니다.',
         sub: 'A tool for creating motion\ngraphics and videos, mainly\nused to produce promotional\nclips.'
       }
     ],
@@ -98,7 +98,7 @@ const RESUME_DATA = {
       },
       {
         title: 'GitHub',
-        desc: 'HTML/CSS/JS로 작성한 프로젝트의\n소스 코드를 저장하고 변경 이력을\n관리하거나, GitHub Pages를 이용\n해 포트폴리오나 프로젝트 사이트를\n웹에 호스팅할 때 활용합니다.',
+        desc: 'HTML/CSS/JS로 작성한 프로젝트의\n소스 코드를 저장하고 변경 이력을\n관리하거나, GitHub Pages를 \n이용해 포트폴리오나 프로젝트 사이트를\n웹에 호스팅할 때 활용합니다.',
         sub: 'Used to store source code and\nmanage version history for\nprojects built with HTML, CSS,\nand JS.'
       }
     ],

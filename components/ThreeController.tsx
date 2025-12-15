@@ -10,7 +10,7 @@ interface ThreeControllerProps {
   selectedId: number | null;
 }
 
-// 초기 상태 저장용 (복귀를 위해 필수)
+// 각 요소의 원래 위치/회전/크기를 저장하는 인터페이스
 interface InitialState {
     pos: THREE.Vector3;
     quat: THREE.Quaternion;
@@ -30,13 +30,14 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
   
   // Data Refs
   const lpObjectsRef = useRef<LPObject[]>([]);
-  const shelfPartsRef = useRef<THREE.Object3D[]>([]); 
+  
+  // 초기 상태 저장소 (복귀용)
   const initialStatesRef = useRef<Map<THREE.Object3D, InitialState>>(new Map());
   
   const isTransitioningRef = useRef(false);
   const animationFrameRef = useRef<number>(0);
 
-  // 1. Scene 초기화
+  // 1. 초기화
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
@@ -45,10 +46,9 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Camera: [수정] 완전한 정면 뷰를 위해 Z축으로만 이동
+    // Camera: 더 가깝게 설정하여 모델이 크게 보이도록 함 (Zoom In)
     const camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 1000);
-    camera.position.set(0, 0, 9); // 정면에서 멀리 떨어짐
-    camera.lookAt(0, 0, 0);       // 중앙 응시
+    camera.position.set(3.5, 2.0, 4.5); 
     cameraRef.current = camera;
 
     // Renderer
@@ -61,26 +61,24 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     rendererRef.current = renderer;
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    dirLight.position.set(5, 5, 10); // 정면 조명 강화
+    dirLight.position.set(5, 10, 7);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    fillLight.position.set(-5, 0, 5);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    fillLight.position.set(-5, 2, -5);
     scene.add(fillLight);
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.minDistance = 4;
-    controls.maxDistance = 15;
-    // [수정] 밑면/윗면을 너무 많이 보지 못하게 각도 제한 (사용자 요청 반영)
-    controls.minPolarAngle = Math.PI / 3; // 위쪽 제한
-    controls.maxPolarAngle = Math.PI / 1.5; // 아래쪽 제한
+    controls.minDistance = 2;
+    controls.maxDistance = 20;
+    controls.maxPolarAngle = Math.PI / 2 - 0.1; 
     controlsRef.current = controls;
 
     // Load Model
@@ -94,16 +92,24 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
       (gltf) => {
         console.log("✅ 모델 로딩 성공");
         const model = gltf.scene;
-        
-        // 그림자 설정
+
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
+            
+            // 양면 렌더링 설정
+            const mesh = child as THREE.Mesh;
+            if (mesh.material) {
+                if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(m => m.side = THREE.DoubleSide);
+                } else {
+                    mesh.material.side = THREE.DoubleSide;
+                }
+            }
           }
         });
 
-        // 구조 정리 (Flatten)
         processModel(model, scene);
       },
       undefined,
@@ -119,11 +125,13 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
 
     const onClick = () => {
       if (isTransitioningRef.current || selectedId !== null || !sceneRef.current) return; 
+      
       raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current!);
       const intersects = raycasterRef.current.intersectObjects(sceneRef.current.children, true);
 
       if (intersects.length > 0) {
         let target: THREE.Object3D | null = intersects[0].object;
+        // 부모를 타고 올라가며 등록된 LP인지 확인
         while (target) {
             const foundLP = lpObjectsRef.current.find(lp => lp.mesh === target);
             if (foundLP) {
@@ -175,35 +183,28 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
   }, [selectedId]);
 
 
-  // 📌 모델 평탄화 (모든 요소를 독립적으로 만듦)
   const processModel = (model: THREE.Object3D, scene: THREE.Scene) => {
     const foundLPs: Record<number, THREE.Object3D> = {};
     const foundVinyls: Record<number, THREE.Object3D> = {};
-    const others: THREE.Object3D[] = [];
 
-    const vinylRegex = /^Vinyl_?(\d+)/i;    
-    const coverRegex = /^LP_Cover_?(\d+)/i; 
+    const vinylRegex = /^Vinyl[_\s-]*0?(\d+)/i;    
+    const coverRegex = /^LP[_\s-]*Cover[_\s-]*0?(\d+)/i; 
 
-    // Scene Graph 복사 (순회 중 변경 방지)
-    const children = [...model.children];
-
-    children.forEach((child) => {
+    // 1. 모델 전체를 순회하며 LP와 Vinyl 객체 식별 (깊이 상관없이)
+    model.traverse((child) => {
       const name = child.name;
       const vMatch = name.match(vinylRegex);
       const cMatch = name.match(coverRegex);
 
-      if (vMatch && !name.includes('.')) {
+      if (vMatch) {
          foundVinyls[parseInt(vMatch[1])] = child;
       } else if (cMatch) {
          foundLPs[parseInt(cMatch[1])] = child;
-      } else if (name !== 'Camera' && name !== 'Light') {
-         others.push(child);
       }
     });
 
-    // Scene에 붙이고 초기 상태 저장하는 함수
     const attachAndSave = (obj: THREE.Object3D) => {
-        scene.attach(obj);
+        scene.attach(obj); // Scene 루트로 이동 (계층 구조 평탄화)
         initialStatesRef.current.set(obj, {
             pos: obj.position.clone(),
             quat: obj.quaternion.clone(),
@@ -211,89 +212,100 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
         });
     };
 
-    others.forEach(obj => {
-        attachAndSave(obj);
-        shelfPartsRef.current.push(obj);
+    // 2. LP/Vinyl을 Scene에 Attach (부모에서 분리)
+    Object.values(foundLPs).forEach(obj => attachAndSave(obj));
+    Object.values(foundVinyls).forEach(obj => attachAndSave(obj));
+
+    // 3. 남은 요소들(선반 등)을 Scene에 추가하고 초기 상태 저장
+    // LP/Vinyl이 빠져나간 model 껍데기와 그 안의 나머지 요소들(Shelf 등)
+    scene.add(model);
+    initialStatesRef.current.set(model, {
+        pos: model.position.clone(),
+        quat: model.quaternion.clone(),
+        scale: model.scale.clone()
     });
 
+    // 4. 데이터 구조 생성
     Object.keys(foundLPs).forEach(key => {
         const id = Number(key);
         const coverObj = foundLPs[id];
         const vinylObj = foundVinyls[id] || null;
 
-        attachAndSave(coverObj);
-        if (vinylObj) attachAndSave(vinylObj);
-
         lpObjectsRef.current.push({
             id,
             mesh: coverObj as THREE.Mesh,
             vinyl: vinylObj,
-            originalPosition: coverObj.position.clone(), // 미사용 (Map 사용)
+            originalPosition: coverObj.position.clone(),
             originalRotation: coverObj.quaternion.clone(),
             originalScale: coverObj.scale.clone(),
             vinylOriginalPosition: null, vinylOriginalRotation: null, vinylOriginalScale: null
         });
     });
+
+    console.log(`✅ 구조 처리 완료. LP: ${lpObjectsRef.current.length}개`);
   };
 
-  // 📌 선택 애니메이션 (정가운데 정렬)
   const animateSelection = (targetLP: LPObject) => {
     if (isTransitioningRef.current) return;
     isTransitioningRef.current = true;
-    if(controlsRef.current) controlsRef.current.enabled = false; // 컨트롤 잠금
+    if(controlsRef.current) controlsRef.current.enabled = false;
 
-    const duration = 1000;
+    const duration = 1200;
     const startTime = Date.now();
 
-    // 1. 선택된 LP 목표: 화면 정중앙 (0,0,0)보다 약간 앞
-    // 카메라가 (0,0,9)에 있으므로 (0,0,5) 정도면 꽉 차게 보임
-    const targetPos = new THREE.Vector3(0, 0, 5); 
-    
-    // 🔥 회전: 무조건 정면(0,0,0)을 보게 함
+    // [수정] 정면을 바라보도록 설정 (기존 90도 회전 제거)
     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0));
     
-    // 확대
-    const targetScale = new THREE.Vector3(2.5, 2.5, 2.5);
+    // [수정] 간격 조정 (화면 중앙에 가깝게)
+    const targetPos = new THREE.Vector3(-0.85, 0, 0); 
+    const vinylTargetPos = new THREE.Vector3(0.85, 0, 0); 
 
-    // 2. Vinyl 목표: 커버 위로 솟아오름
-    const vinylTargetPos = new THREE.Vector3(0, 1.2, 4.9); // 커버(Z=5)보다 살짝 뒤(Z=4.9), 위로(Y=1.2)
+    // [수정] 카메라 줌인 (가까이서 크게 보기)
+    const cameraStartPos = cameraRef.current!.position.clone();
+    const cameraTargetPos = new THREE.Vector3(0, 0, 4.0); 
 
-    // 3. 선반 및 나머지 목표: 뒤쪽 아래로 물러남 (사용자가 원한 방향)
-    const dropOffset = new THREE.Vector3(0, -10, -5); 
+    const controlsStartTarget = controlsRef.current!.target.clone();
+    const controlsTarget = new THREE.Vector3(0, 0, 0); 
 
-    // 현재 상태 캡처
     const startState = {
         lpPos: targetLP.mesh.position.clone(),
         lpQuat: targetLP.mesh.quaternion.clone(),
         lpScale: targetLP.mesh.scale.clone(),
         vPos: targetLP.vinyl?.position.clone(),
         vQuat: targetLP.vinyl?.quaternion.clone(),
-        vScale: targetLP.vinyl?.scale.clone(),
     };
 
     const loop = () => {
         const progress = Math.min((Date.now() - startTime) / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 3);
+        const ease = 1 - Math.pow(1 - progress, 4); 
 
-        // A. Target LP 이동
+        // 1. LP Move
         targetLP.mesh.position.lerpVectors(startState.lpPos, targetPos, ease);
         targetLP.mesh.quaternion.slerpQuaternions(startState.lpQuat, targetQuat, ease);
-        targetLP.mesh.scale.lerpVectors(startState.lpScale, targetScale, ease);
+        targetLP.mesh.scale.lerpVectors(startState.lpScale, new THREE.Vector3(1.6, 1.6, 1.6), ease); // 1.6배 확대
 
-        // B. Target Vinyl 이동
-        if (targetLP.vinyl && startState.vPos && startState.vQuat && startState.vScale) {
+        // 2. Vinyl Move
+        if (targetLP.vinyl && startState.vPos && startState.vQuat) {
             targetLP.vinyl.position.lerpVectors(startState.vPos, vinylTargetPos, ease);
             targetLP.vinyl.quaternion.slerpQuaternions(startState.vQuat, targetQuat, ease);
-            targetLP.vinyl.scale.lerpVectors(startState.vScale, targetScale, ease);
+            targetLP.vinyl.scale.setScalar(1 + (1.6 - 1) * ease);
         }
 
-        // C. 나머지 모두 치우기
+        // 3. Others (Scale to 0) - Shelf 포함
         initialStatesRef.current.forEach((init, obj) => {
-            if (obj === targetLP.mesh || obj === targetLP.vinyl) return; // 주인공 제외
+            if (obj === targetLP.mesh || obj === targetLP.vinyl) return; 
             
-            const targetDropPos = init.pos.clone().add(dropOffset);
-            obj.position.lerpVectors(init.pos, targetDropPos, ease);
+            obj.scale.lerpVectors(init.scale, new THREE.Vector3(0, 0, 0), ease);
+            const dropPos = init.pos.clone().add(new THREE.Vector3(0, -5, -5));
+            obj.position.lerpVectors(init.pos, dropPos, ease);
         });
+
+        // 4. Camera & Controls
+        if (cameraRef.current && controlsRef.current) {
+            cameraRef.current.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
+            controlsRef.current.target.lerpVectors(controlsStartTarget, controlsTarget, ease);
+            cameraRef.current.lookAt(controlsRef.current.target);
+        }
 
         if (progress < 1) requestAnimationFrame(loop);
         else isTransitioningRef.current = false;
@@ -301,14 +313,12 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     loop();
   };
 
-  // 📌 복귀 애니메이션 (X 버튼)
   const animateClose = () => {
     isTransitioningRef.current = true;
     
-    const duration = 800;
+    const duration = 1000;
     const startTime = Date.now();
 
-    // 현재 위치들 캡처
     const currentPositions = new Map<THREE.Object3D, { pos: THREE.Vector3, quat: THREE.Quaternion, scale: THREE.Vector3 }>();
     initialStatesRef.current.forEach((_, obj) => {
         currentPositions.set(obj, {
@@ -318,9 +328,16 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
         });
     });
 
+    const cameraStartPos = cameraRef.current!.position.clone();
+    // 초기 카메라 위치로 복귀 (줌인된 상태 유지)
+    const cameraTargetPos = new THREE.Vector3(3.5, 2.0, 4.5); 
+
+    const controlsStartTarget = controlsRef.current!.target.clone();
+    const controlsTarget = new THREE.Vector3(0, 0, 0);
+
     const loop = () => {
         const progress = Math.min((Date.now() - startTime) / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 3);
+        const ease = 1 - Math.pow(1 - progress, 4);
 
         initialStatesRef.current.forEach((init, obj) => {
             const current = currentPositions.get(obj)!;
@@ -330,11 +347,17 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
             obj.scale.lerpVectors(current.scale, init.scale, ease);
         });
 
+        if (cameraRef.current && controlsRef.current) {
+            cameraRef.current.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
+            controlsRef.current.target.lerpVectors(controlsStartTarget, controlsTarget, ease);
+            cameraRef.current.lookAt(controlsRef.current.target);
+        }
+
         if (progress < 1) {
             requestAnimationFrame(loop);
         } else {
             isTransitioningRef.current = false;
-            if(controlsRef.current) controlsRef.current.enabled = true; // 컨트롤 잠금 해제
+            if(controlsRef.current) controlsRef.current.enabled = true;
         }
     };
     loop();

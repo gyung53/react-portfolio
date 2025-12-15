@@ -10,15 +10,20 @@ const WorkPage: React.FC = () => {
     ? PROJECTS.find(p => p.id === selectedProjectId) || null 
     : null;
 
-  const bgImage = currentProject ? `url('${currentProject.bgImage}')` : 'none';
-
   return (
     <>
-      {/* Dynamic Background Layer */}
-      <div 
-         className="absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out"
-         style={{ backgroundImage: bgImage, opacity: currentProject ? 1 : 0 }}
-      />
+      {/* Dynamic Background Layers - Smooth Transition */}
+      {PROJECTS.map((project) => (
+        <div 
+           key={project.id}
+           className="absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out pointer-events-none"
+           style={{ 
+             backgroundImage: `url('${project.bgImage}')`, 
+             opacity: selectedProjectId === project.id ? 1 : 0,
+             zIndex: 0
+           }}
+        />
+      ))}
       
       {/* 3D Scene */}
       <ThreeController 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Project } from '../types';
 import { PROJECTS } from '../constants';
 
@@ -9,16 +9,26 @@ interface PlaylistPanelProps {
 }
 
 const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectProject, onClose }) => {
-  const [viewMode, setViewMode] = useState<'playingNext' | 'overview'>('playingNext');
+  const [viewMode, setViewMode] = useState<'playingNext' | 'overview'>('overview');
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
-  const [tab, setTab] = useState<'overview' | 'landing' | 'prototype'>('overview');
   
+  // 프로젝트 변경 시 초기화
   useEffect(() => {
-    setViewMode('playingNext');
-    setTab('overview');
+    setViewMode('overview');
     setProgress(0);
     setIsPlaying(true);
+  }, [currentProject]);
+
+  // Playing Next를 위한 순환 리스트 생성 (현재 프로젝트 다음부터 시작)
+  const orderedProjects = useMemo(() => {
+    if (!currentProject) return [];
+    const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
+    if (currentIndex === -1) return [];
+
+    const after = PROJECTS.slice(currentIndex + 1);
+    const before = PROJECTS.slice(0, currentIndex);
+    return [...after, ...before];
   }, [currentProject]);
 
   // Auto-play interval
@@ -38,10 +48,8 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
   // Handle track switch when progress finishes
   useEffect(() => {
     if (progress >= 100 && currentProject) {
-        // Find current ID index
         const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
         if (currentIndex !== -1) {
-            // Calculate next index securely
             const nextIndex = (currentIndex + 1) % PROJECTS.length;
             const nextId = PROJECTS[nextIndex].id;
             onSelectProject(nextId);
@@ -131,8 +139,8 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
                 />
             </div>
             <div className="flex justify-between text-xs text-gray-400">
-                <span>24.09.01</span>
-                <span>24.12.15</span>
+                <span>{currentProject.startDate}</span>
+                <span>{currentProject.endDate}</span>
             </div>
         </div>
 
@@ -150,7 +158,7 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
             <>
                 <h3 className="text-sm font-bold text-gray-400 mb-4 uppercase">PLAYING NEXT</h3>
                 <div className="flex flex-col gap-2.5 overflow-y-auto pr-1">
-                    {PROJECTS.filter(p => p.id !== currentProject.id).map(p => (
+                    {orderedProjects.map(p => (
                         <div 
                             key={p.id} 
                             onClick={() => onSelectProject(p.id)}
@@ -169,33 +177,38 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
             <>
                 <h3 className="text-sm font-bold text-gray-400 mb-4 uppercase">PROJECT DETAILS</h3>
                 
-                <div className="flex gap-2.5 mb-5 flex-shrink-0">
-                    {(['overview', 'landing', 'prototype'] as const).map(t => (
-                        <button
-                            key={t}
-                            onClick={() => setTab(t)}
-                            className={`px-4 py-2 rounded-full text-[13px] font-semibold transition-all ${
-                                tab === t ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                            }`}
-                        >
-                            {t.charAt(0).toUpperCase() + t.slice(1)}
-                        </button>
-                    ))}
+                <div className="text-sm leading-relaxed text-gray-600 animate-fadeInDown overflow-y-auto pr-2 flex-1 mb-4">
+                    <p className="font-bold text-black mb-2">Overview</p>
+                    {currentProject.overview}
                 </div>
 
-                <div className="text-sm leading-relaxed text-gray-600 animate-fadeInDown overflow-y-auto pr-2">
-                    {tab === 'overview' && currentProject.overview}
-                    {tab === 'landing' && (
-                        <div>
-                            <p className="mb-2">Landing Page structure and design elements.</p>
-                            <p>This area can contain more detailed descriptions or links to the actual landing page views.</p>
-                        </div>
-                    )}
-                    {tab === 'prototype' && (
-                        <div>
-                            <p className="mb-2">Interactive Prototype.</p>
-                            <p>Clicking here could open a modal with the Figma prototype or redirect to a demo link.</p>
-                        </div>
+                <div className="flex gap-2.5 mt-auto pt-4 border-t border-gray-100">
+                    <a
+                        href={currentProject.landingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-primary text-white hover:bg-purple-700 hover:-translate-y-0.5 transition-all shadow-md"
+                    >
+                        Landing Page ↗
+                    </a>
+                    <a
+                        href={currentProject.prototypeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 hover:-translate-y-0.5 transition-all"
+                    >
+                        Prototype ↗
+                    </a>
+                    {/* 3rd Button (Conditionally Rendered) */}
+                    {currentProject.codeUrl && (
+                        <a
+                            href={currentProject.codeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-black text-white hover:bg-gray-800 hover:-translate-y-0.5 transition-all shadow-md"
+                        >
+                            Code ↗
+                        </a>
                     )}
                 </div>
             </>
