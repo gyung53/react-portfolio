@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+// ▼▼▼ 로딩 화면 배경 이미지 경로를 여기서 수정하세요 ▼▼▼
+const LOADING_BG_PATH = "/public/background.png";
+
 interface LoadingScreenProps {
   onComplete: () => void;
 }
@@ -132,10 +135,11 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
         <div className="blur-background">
             <img 
                 ref={blurImgRef}
-                src="/assets/images/background.png" 
-                alt="" 
+                src={LOADING_BG_PATH}
+                alt="Background" 
                 className="bg_img"
                 onError={(e) => {
+                    // 이미지가 없을 경우 숨김 처리 (CSS 그라디언트가 보임)
                     e.currentTarget.style.display = 'none';
                 }}
             />

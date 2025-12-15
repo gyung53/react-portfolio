@@ -71,7 +71,7 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     // Load Model
     const loader = new GLTFLoader();
     loader.load(
-      '/assets/LP.glb', 
+      '/public/LP.glb', 
       (gltf) => {
         const model = gltf.scene;
         scene.add(model);
@@ -249,7 +249,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
   };
 
   const createPlaceholders = (scene: THREE.Scene) => {
-    // Create Vinyl-like placeholders instead of boxes
     const colors = [0xFF6B6B, 0x4ECDC4, 0xFFD93D, 0xFF9F1C, 0x6A0572, 0xF7FFF7];
     
     for (let i = 0; i < 6; i++) {
@@ -260,11 +259,9 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
             metalness: 0.1
         });
         const mesh = new THREE.Mesh(geometry, material);
-        // Rotate to stand up
         mesh.rotation.x = Math.PI / 2;
-        mesh.rotation.y = Math.PI / 4; // Slight angle
+        mesh.rotation.y = Math.PI / 4; 
         
-        // Stack them
         mesh.position.set(0, 0, i * 0.3 - 0.9); 
         mesh.castShadow = true;
         scene.add(mesh);
@@ -291,20 +288,47 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     const duration = 1000;
     const startTime = Date.now();
 
+    // 1. Camera to Front View
     const cameraStartPos = cameraRef.current!.position.clone();
-    const cameraTargetPos = new THREE.Vector3(0, 0, 4.2);
-    const lookAtStart = new THREE.Vector3(0, 0, 0);
+    const cameraTargetPos = new THREE.Vector3(3, 0, 0); // Adjusted for front view
+    const lookAtStart = controlsRef.current?.target.clone() || new THREE.Vector3(0,0,0);
     const lookAtTarget = new THREE.Vector3(0, 0, 0);
 
+    // 2. Selected Cover - Move Center-Left, Face Front
     const selectedCoverStartPos = lpData.mesh.position.clone();
-    const selectedCoverTargetPos = new THREE.Vector3(-0.4, 0, 0);
-    const targetScale = 1.92;
+    const selectedCoverTargetPos = new THREE.Vector3(-0.4, 0, 0); 
     
     const startRotationY = lpData.mesh.rotation.y;
-    const targetRotationY = lpData.originalRotation.y - Math.PI / 2;
+    // Rotate -90deg from shelf position to face forward
+    const targetRotationY = lpData.originalRotation.y - Math.PI; 
+    
     const startRotationX = lpData.mesh.rotation.x;
     const targetRotationX = -3 * (Math.PI / 180);
 
+    const targetScale = 1.92;
+
+    // 3. Selected Vinyl - Move Center-Right, Face Front
+    let selectedVinylStartPos: THREE.Vector3 | null = null;
+    let selectedVinylTargetPos: THREE.Vector3 | null = null;
+    
+    let vinylStartRotationY = 0;
+    let vinylTargetRotationY = 0;
+    
+    let vinylStartRotationX = 0;
+    const vinylTargetRotationX = -3 * (Math.PI / 180);
+    
+    if (lpData.vinyl) {
+        selectedVinylStartPos = lpData.vinyl.position.clone();
+        selectedVinylTargetPos = new THREE.Vector3(0.9, 0, 0.05); 
+        
+        vinylStartRotationY = lpData.vinyl.rotation.y;
+        const vOrigY = lpData.vinylOriginalRotation ? lpData.vinylOriginalRotation.y : 0;
+        vinylTargetRotationY = vOrigY - Math.PI / 2;
+
+        vinylStartRotationX = lpData.vinyl.rotation.x;
+    }
+
+    // 4. Shelf & Others - Move DOWN out of view
     const shelfStartPositions = shelfObjectsRef.current.map(obj => obj.mesh.position.clone());
     const otherLPsStartPos = lpObjectsRef.current
         .filter(lp => lp.id !== lpData.id)
@@ -319,27 +343,46 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
         const progress = Math.min(elapsed / duration, 1);
         const eased = 1 - Math.pow(1 - progress, 3);
 
+        // Camera
         if (cameraRef.current) {
             cameraRef.current.position.lerpVectors(cameraStartPos, cameraTargetPos, eased);
             const currentLookAt = new THREE.Vector3().lerpVectors(lookAtStart, lookAtTarget, eased);
             cameraRef.current.lookAt(currentLookAt);
+            if(controlsRef.current) controlsRef.current.target.copy(currentLookAt);
         }
 
+        // Selected Cover
         lpData.mesh.position.lerpVectors(selectedCoverStartPos, selectedCoverTargetPos, eased);
         lpData.mesh.scale.setScalar(1 + (targetScale - 1) * eased);
         lpData.mesh.rotation.y = startRotationY + (targetRotationY - startRotationY) * eased;
         lpData.mesh.rotation.x = startRotationX + (targetRotationX - startRotationX) * eased;
 
+        // Selected Vinyl
+        if (lpData.vinyl && selectedVinylStartPos && selectedVinylTargetPos) {
+             lpData.vinyl.position.lerpVectors(selectedVinylStartPos, selectedVinylTargetPos, eased);
+             lpData.vinyl.scale.setScalar(1 + (targetScale - 1) * eased);
+             
+             lpData.vinyl.rotation.y = vinylStartRotationY + (vinylTargetRotationY - vinylStartRotationY) * eased;
+             lpData.vinyl.rotation.x = vinylStartRotationX + (vinylTargetRotationX - vinylStartRotationX) * eased;
+        }
+
+        // Move others DOWN
         shelfObjectsRef.current.forEach((shelfObj, index) => {
             const targetPos = shelfStartPositions[index].clone();
-            targetPos.z += 10;
+            targetPos.y -= 20; // Drop down significantly
             shelfObj.mesh.position.lerpVectors(shelfStartPositions[index], targetPos, eased);
         });
 
         otherLPsStartPos.forEach(item => {
             const coverTarget = item.coverStartPos.clone();
-            coverTarget.z += 10;
+            coverTarget.y -= 20; // Drop down
             item.lp.mesh.position.lerpVectors(item.coverStartPos, coverTarget, eased);
+            
+            if (item.lp.vinyl && item.vinylStartPos) {
+                 const vinylTarget = item.vinylStartPos.clone();
+                 vinylTarget.y -= 20;
+                 item.lp.vinyl.position.lerpVectors(item.vinylStartPos, vinylTarget, eased);
+            }
         });
 
         if (progress < 1) {
@@ -360,10 +403,14 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     const cameraCurrentPos = cameraRef.current!.position.clone();
     const cameraOriginalPos = new THREE.Vector3(4, 3, 4);
     
+    // Save current states to lerp from
     const currentStates = lpObjectsRef.current.map(lp => ({
         pos: lp.mesh.position.clone(),
         rot: lp.mesh.rotation.clone(),
         scale: lp.mesh.scale.clone(),
+        vinylPos: lp.vinyl ? lp.vinyl.position.clone() : null,
+        vinylRot: lp.vinyl ? lp.vinyl.rotation.clone() : null,
+        vinylScale: lp.vinyl ? lp.vinyl.scale.clone() : null
     }));
     
     const shelfCurrentPos = shelfObjectsRef.current.map(s => s.mesh.position.clone());
@@ -379,12 +426,22 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
         }
 
         lpObjectsRef.current.forEach((lp, idx) => {
+            // Restore Cover
             lp.mesh.position.lerpVectors(currentStates[idx].pos, lp.originalPosition, eased);
             lp.mesh.scale.lerpVectors(currentStates[idx].scale, lp.originalScale, eased);
             lp.mesh.rotation.y = currentStates[idx].rot.y + (lp.originalRotation.y - currentStates[idx].rot.y) * eased;
             lp.mesh.rotation.x = currentStates[idx].rot.x + (lp.originalRotation.x - currentStates[idx].rot.x) * eased;
+
+            // Restore Vinyl
+            if (lp.vinyl && currentStates[idx].vinylPos && lp.vinylOriginalPosition && lp.vinylOriginalRotation && lp.vinylOriginalScale) {
+                lp.vinyl.position.lerpVectors(currentStates[idx].vinylPos, lp.vinylOriginalPosition, eased);
+                lp.vinyl.scale.lerpVectors(currentStates[idx].vinylScale, lp.vinylOriginalScale, eased);
+                lp.vinyl.rotation.y = currentStates[idx].vinylRot!.y + (lp.vinylOriginalRotation.y - currentStates[idx].vinylRot!.y) * eased;
+                lp.vinyl.rotation.x = currentStates[idx].vinylRot!.x + (lp.vinylOriginalRotation.x - currentStates[idx].vinylRot!.x) * eased;
+            }
         });
 
+        // Restore Shelf (Coming back up)
         shelfObjectsRef.current.forEach((shelf, idx) => {
             shelf.mesh.position.lerpVectors(shelfCurrentPos[idx], shelf.originalPosition, eased);
         });

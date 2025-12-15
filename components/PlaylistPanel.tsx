@@ -21,18 +21,33 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
     setIsPlaying(true);
   }, [currentProject]);
 
+  // Auto-play interval
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (isPlaying && currentProject) {
       interval = setInterval(() => {
         setProgress(prev => {
-          if (prev >= 100) return 0;
-          return prev + 0.5;
+          if (prev >= 100) return 100; // Cap at 100
+          return prev + 0.5; // Speed of progress
         });
       }, 50);
     }
     return () => clearInterval(interval);
   }, [isPlaying, currentProject]);
+
+  // Handle track switch when progress finishes
+  useEffect(() => {
+    if (progress >= 100 && currentProject) {
+        // Find current ID index
+        const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
+        if (currentIndex !== -1) {
+            // Calculate next index securely
+            const nextIndex = (currentIndex + 1) % PROJECTS.length;
+            const nextId = PROJECTS[nextIndex].id;
+            onSelectProject(nextId);
+        }
+    }
+  }, [progress, currentProject, onSelectProject]);
 
   const toggleViewMode = () => {
     setViewMode(prev => prev === 'playingNext' ? 'overview' : 'playingNext');
@@ -40,16 +55,20 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
 
   const handleNext = () => {
     if (!currentProject) return;
-    const idx = PROJECTS.findIndex(p => p.id === currentProject.id);
-    const nextId = PROJECTS[(idx + 1) % PROJECTS.length].id;
-    onSelectProject(nextId);
+    const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
+    if (currentIndex !== -1) {
+        const nextIndex = (currentIndex + 1) % PROJECTS.length;
+        onSelectProject(PROJECTS[nextIndex].id);
+    }
   };
 
   const handlePrev = () => {
     if (!currentProject) return;
-    const idx = PROJECTS.findIndex(p => p.id === currentProject.id);
-    const prevId = PROJECTS[(idx - 1 + PROJECTS.length) % PROJECTS.length].id;
-    onSelectProject(prevId);
+    const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
+    if (currentIndex !== -1) {
+        const prevIndex = (currentIndex - 1 + PROJECTS.length) % PROJECTS.length;
+        onSelectProject(PROJECTS[prevIndex].id);
+    }
   };
 
   // List View
