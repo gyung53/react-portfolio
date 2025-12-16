@@ -10,33 +10,40 @@ interface ThreeControllerProps {
   selectedId: number | null;
 }
 
-// 각 요소의 원래 위치/회전/크기를 저장하는 인터페이스
 interface InitialState {
+    parent: THREE.Object3D | null;
     pos: THREE.Vector3;
     quat: THREE.Quaternion;
     scale: THREE.Vector3;
 }
 
+// [상수 정의]
+const DEFAULT_CAMERA_POS = new THREE.Vector3(3, 2, 11); // 탐색 시 카메라 위치
+// [수정] 줌아웃을 위해 Z값 증가 (12 -> 17)
+const FOCUS_CAMERA_POS = new THREE.Vector3(0, 0, 14.5);   
+const FOCUS_LOOK_AT = new THREE.Vector3(0, 0, 0);       
+
 const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedId }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // Refs
+  // Three.js Core Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
-  const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   
-  // Data Refs
+  // Model & State Refs
+  const modelWrapperRef = useRef<THREE.Group>(new THREE.Group()); 
   const lpObjectsRef = useRef<LPObject[]>([]);
-  const shelfPartsRef = useRef<THREE.Object3D[]>([]); // 선반 부품들
-  
-  // 초기 상태 저장소 (복귀용)
   const initialStatesRef = useRef<Map<THREE.Object3D, InitialState>>(new Map());
+  const initialWrapperScaleRef = useRef<number>(1); 
   
+  // Logic Refs
   const isTransitioningRef = useRef(false);
+  const activeIdRef = useRef<number | null>(null); // 현재 화면에 나와있는 LP ID 트래킹
   const animationFrameRef = useRef<number>(0);
+  const pointerDownRef = useRef<{x: number, y: number} | null>(null);
 
   // 1. 초기화
   useEffect(() => {
@@ -47,104 +54,47 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Camera: 얼짱 각도 (대각선 위)
+    // Camera
     const camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 1000);
-    camera.position.set(5, 3, 6); 
+    camera.position.copy(DEFAULT_CAMERA_POS); 
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.setSize(container.offsetWidth, container.offsetHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.outputColorSpace = THREE.SRGBColorSpace; 
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // 밝기 약간 증가
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
     dirLight.position.set(5, 10, 7);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.0);
     fillLight.position.set(-5, 2, -5);
     scene.add(fillLight);
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.minDistance = 3;
-    controls.maxDistance = 20;
-    controls.maxPolarAngle = Math.PI / 2 - 0.1; 
+    controls.dampingFactor = 0.05;
+    controls.minDistance = 2;
+    controls.maxDistance = 30;
+    controls.maxPolarAngle = Math.PI / 2;
+    controls.target.set(0, 0, 0); 
     controlsRef.current = controls;
 
-    // Load Model
-    const loader = new GLTFLoader();
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-    loader.setDRACOLoader(dracoLoader);
-
-    loader.load(
-      '/LP.glb', 
-      (gltf) => {
-        console.log("✅ 모델 로딩 성공");
-        const model = gltf.scene;
-
-        model.traverse((child) => {
-          if ((child as THREE.Mesh).isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-            
-            // [중요] 양면 렌더링 설정 - 회전 시 투명해지는 현상 방지
-            const mesh = child as THREE.Mesh;
-            if (mesh.material) {
-                if (Array.isArray(mesh.material)) {
-                    mesh.material.forEach(m => m.side = THREE.DoubleSide);
-                } else {
-                    mesh.material.side = THREE.DoubleSide;
-                }
-            }
-          }
-        });
-
-        processModel(model, scene);
-      },
-      undefined,
-      (error) => console.warn("⚠️ 로딩 실패:", error)
-    );
+    // Model Loader
+    loadModel(scene);
 
     // Events
-    const onMouseMove = (e: MouseEvent) => {
-      const rect = container.getBoundingClientRect();
-      mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    };
-
-    const onClick = () => {
-      if (isTransitioningRef.current || selectedId !== null || !sceneRef.current) return; 
-      
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current!);
-      // recursive: true로 설정하여 그룹 내부 mesh까지 체크
-      const intersects = raycasterRef.current.intersectObjects(sceneRef.current.children, true);
-
-      if (intersects.length > 0) {
-        let target: THREE.Object3D | null = intersects[0].object;
-        // 부모를 타고 올라가며 등록된 LP인지 확인
-        while (target) {
-            const foundLP = lpObjectsRef.current.find(lp => lp.mesh === target);
-            if (foundLP) {
-                onLPSelect(foundLP.id);
-                return;
-            }
-            target = target.parent;
-        }
-      }
-    };
-
     const onResize = () => {
         if(!cameraRef.current || !rendererRef.current) return;
         cameraRef.current.aspect = container.offsetWidth / container.offsetHeight;
@@ -152,10 +102,23 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
         rendererRef.current.setSize(container.offsetWidth, container.offsetHeight);
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    container.addEventListener('click', onClick);
-    window.addEventListener('resize', onResize);
+    const onPointerDown = (e: PointerEvent) => {
+        pointerDownRef.current = { x: e.clientX, y: e.clientY };
+    };
 
+    const onPointerUp = (e: PointerEvent) => {
+        if (!pointerDownRef.current) return;
+        const dx = Math.abs(e.clientX - pointerDownRef.current.x);
+        const dy = Math.abs(e.clientY - pointerDownRef.current.y);
+        if (dx < 5 && dy < 5) handleClick(e);
+        pointerDownRef.current = null;
+    };
+
+    window.addEventListener('resize', onResize);
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+
+    // Animation Loop
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       if (controlsRef.current) controlsRef.current.update();
@@ -166,204 +129,410 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     animate();
 
     return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      container.removeEventListener('click', onClick);
       window.removeEventListener('resize', onResize);
+      if (rendererRef.current) {
+          rendererRef.current.domElement.removeEventListener('pointerdown', onPointerDown);
+          rendererRef.current.domElement.removeEventListener('pointerup', onPointerUp);
+      }
       cancelAnimationFrame(animationFrameRef.current);
       if(container) container.innerHTML = '';
     };
   }, []);
 
-  // 선택 상태 감지
-  useEffect(() => {
-    if (selectedId !== null) {
-      const lpData = lpObjectsRef.current.find(lp => lp.id === selectedId);
-      if (lpData) animateSelection(lpData);
-    } else {
-      animateClose();
-    }
-  }, [selectedId]);
+  // 2. 모델 로드
+  const loadModel = (scene: THREE.Scene) => {
+    const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    loader.setDRACOLoader(dracoLoader);
 
+    loader.load(
+      '/LP.glb',
+      (gltf) => {
+        console.log("✅ GLB Loaded");
+        const model = gltf.scene;
+        
+        model.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                const mesh = child as THREE.Mesh;
+                if (mesh.material) {
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material.forEach(m => m.side = THREE.DoubleSide);
+                    } else {
+                        mesh.material.side = THREE.DoubleSide;
+                    }
+                }
+            }
+        });
 
-  const processModel = (model: THREE.Object3D, scene: THREE.Scene) => {
-    const foundLPs: Record<number, THREE.Object3D> = {};
+        scene.add(modelWrapperRef.current);
+        modelWrapperRef.current.add(model);
+
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+
+        model.position.x = -center.x;
+        model.position.y = -center.y;
+        model.position.z = -center.z;
+
+        // 초기 크기 (4.5)
+        const maxDim = Math.max(size.x, size.y, size.z);
+        if (maxDim > 0) {
+            const scale = 4.5 / maxDim;
+            modelWrapperRef.current.scale.setScalar(scale);
+            initialWrapperScaleRef.current = scale;
+        }
+
+        identifyLPObjects(model);
+      },
+      undefined,
+      (err) => console.error("❌ Loading Error:", err)
+    );
+  };
+
+  const identifyLPObjects = (model: THREE.Object3D) => {
+    const foundLPs: Record<number, THREE.Mesh> = {};
     const foundVinyls: Record<number, THREE.Object3D> = {};
-    const others: THREE.Object3D[] = [];
 
     const vinylRegex = /^Vinyl[_\s-]*0?(\d+)/i;    
     const coverRegex = /^LP[_\s-]*Cover[_\s-]*0?(\d+)/i; 
 
-    const children = [...model.children];
+    model.traverse((child) => {
+        const name = child.name;
+        const vMatch = name.match(vinylRegex);
+        const cMatch = name.match(coverRegex);
 
-    children.forEach((child) => {
-      const name = child.name;
-      const vMatch = name.match(vinylRegex);
-      const cMatch = name.match(coverRegex);
-
-      if (vMatch && !name.includes('.')) {
-         foundVinyls[parseInt(vMatch[1])] = child;
-      } else if (cMatch) {
-         foundLPs[parseInt(cMatch[1])] = child;
-      } else if (name !== 'Camera' && name !== 'Light') {
-         others.push(child);
-      }
+        if (vMatch) foundVinyls[parseInt(vMatch[1])] = child;
+        if (cMatch) foundLPs[parseInt(cMatch[1])] = child as THREE.Mesh;
     });
 
-    const attachAndSave = (obj: THREE.Object3D) => {
-        scene.attach(obj); 
-        initialStatesRef.current.set(obj, {
-            pos: obj.position.clone(),
-            quat: obj.quaternion.clone(),
-            scale: obj.scale.clone()
-        });
-    };
-
-    others.forEach(obj => {
-        attachAndSave(obj);
-        shelfPartsRef.current.push(obj);
-    });
-
-    Object.keys(foundLPs).forEach(key => {
+    Object.keys(foundLPs).forEach((key) => {
         const id = Number(key);
-        const coverObj = foundLPs[id];
-        const vinylObj = foundVinyls[id] || null;
-
-        attachAndSave(coverObj);
-        if (vinylObj) attachAndSave(vinylObj);
+        const mesh = foundLPs[id];
+        const vinyl = foundVinyls[id] || null;
 
         lpObjectsRef.current.push({
             id,
-            mesh: coverObj as THREE.Mesh,
-            vinyl: vinylObj,
-            originalPosition: coverObj.position.clone(),
-            originalRotation: coverObj.quaternion.clone(),
-            originalScale: coverObj.scale.clone(),
+            mesh,
+            vinyl,
+            originalPosition: new THREE.Vector3(),
+            originalRotation: new THREE.Quaternion(),
+            originalScale: new THREE.Vector3(),
             vinylOriginalPosition: null, vinylOriginalRotation: null, vinylOriginalScale: null
         });
     });
-
-    console.log(`✅ 구조 평탄화 완료. LP: ${lpObjectsRef.current.length}, 선반부품: ${others.length}`);
   };
 
-  const animateSelection = (targetLP: LPObject) => {
-    if (isTransitioningRef.current) return;
-    isTransitioningRef.current = true;
-    if(controlsRef.current) controlsRef.current.enabled = false;
+  // 3. 클릭 핸들러
+  const handleClick = (event: PointerEvent) => {
+      // 선택 모드일 때는 클릭 무시 (UI 패널로 제어)
+      if (selectedId !== null) return;
+      if (isTransitioningRef.current || !rendererRef.current || !cameraRef.current || !sceneRef.current) return;
 
-    const duration = 1200;
-    const startTime = Date.now();
+      const rect = rendererRef.current.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-    // [수정] Y축 90도 회전 (정면 보기)
-    const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, 0));
-    
-    // [수정] 간격 조정 (좌우 1.6)
-    const targetPos = new THREE.Vector3(-1.6, 0, 0); 
-    const vinylTargetPos = new THREE.Vector3(1.6, 0, 0); 
+      raycasterRef.current.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
+      
+      const intersects = raycasterRef.current.intersectObjects(modelWrapperRef.current.children, true);
 
-    // [수정] 카메라를 뒤로 뺌 (z=4.5 -> z=8) : 잘림(Clipping) 방지 및 전체 시야 확보
-    const cameraStartPos = cameraRef.current!.position.clone();
-    const cameraTargetPos = new THREE.Vector3(0, 0, 8); 
+      if (intersects.length > 0) {
+          let target: THREE.Object3D | null = intersects[0].object;
+          while (target) {
+              const found = lpObjectsRef.current.find(item => item.mesh === target);
+              if (found) {
+                  onLPSelect(found.id);
+                  return;
+              }
+              target = target.parent;
+          }
+      }
+  };
 
-    const controlsStartTarget = controlsRef.current!.target.clone();
-    const controlsTarget = new THREE.Vector3(0, 0, 0); 
+  // 4. 애니메이션 제어 (State Change Handler)
+  useEffect(() => {
+    const prevId = activeIdRef.current;
+    const nextId = selectedId;
 
-    const startState = {
-        lpPos: targetLP.mesh.position.clone(),
-        lpQuat: targetLP.mesh.quaternion.clone(),
-        lpScale: targetLP.mesh.scale.clone(),
-        vPos: targetLP.vinyl?.position.clone(),
-        vQuat: targetLP.vinyl?.quaternion.clone(),
-    };
+    if (prevId === null && nextId !== null) {
+        // [Open] Shelf -> LP
+        animateSelection(nextId);
+    } else if (prevId !== null && nextId === null) {
+        // [Close] LP -> Shelf
+        animateClose();
+    } else if (prevId !== null && nextId !== null && prevId !== nextId) {
+        // [Switch] LP A -> LP B
+        animateSwitch(prevId, nextId);
+    }
 
-    const loop = () => {
-        const progress = Math.min((Date.now() - startTime) / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 4); 
+    activeIdRef.current = nextId;
+  }, [selectedId]);
 
-        // 1. LP Move
-        targetLP.mesh.position.lerpVectors(startState.lpPos, targetPos, ease);
-        targetLP.mesh.quaternion.slerpQuaternions(startState.lpQuat, targetQuat, ease);
-        // Scale 1.5 유지
-        targetLP.mesh.scale.lerpVectors(startState.lpScale, new THREE.Vector3(1.5, 1.5, 1.5), ease);
+  // --- Animation Logic ---
 
-        // 2. Vinyl Move
-        if (targetLP.vinyl && startState.vPos && startState.vQuat) {
-            targetLP.vinyl.position.lerpVectors(startState.vPos, vinylTargetPos, ease);
-            targetLP.vinyl.quaternion.slerpQuaternions(startState.vQuat, targetQuat, ease);
-            targetLP.vinyl.scale.setScalar(1 + (1.5 - 1) * ease);
-        }
+  // [Common] Restore Object Helper
+  const restoreObject = (obj: THREE.Object3D) => {
+      const init = initialStatesRef.current.get(obj);
+      if (init && init.parent) {
+          init.parent.attach(obj);
+          obj.position.copy(init.pos);
+          obj.quaternion.copy(init.quat);
+          obj.scale.copy(init.scale);
+      }
+  };
 
-        // 3. Others (Scale to 0)
-        initialStatesRef.current.forEach((init, obj) => {
-            if (obj === targetLP.mesh || obj === targetLP.vinyl) return; 
-            
-            obj.scale.lerpVectors(init.scale, new THREE.Vector3(0, 0, 0), ease);
-            const dropPos = init.pos.clone().add(new THREE.Vector3(0, -5, -5));
-            obj.position.lerpVectors(init.pos, dropPos, ease);
-        });
+  // [Helper] 타겟 좌표 및 회전값 계산
+  const getTargetTransform = () => {
+      // [수정] Z 위치를 10 -> 6으로 변경 (카메라 17과의 거리 확보하여 줌아웃 효과)
+      // [수정] X 간격을 넓힘 (-0.65 -> -1.6)
+      const coverTargetPos = new THREE.Vector3(-0.4, 0, 6); 
+      const vinylTargetPos = new THREE.Vector3(0.6, 0, 5.5);
+      
+      const coverDummy = new THREE.Object3D();
+      coverDummy.rotation.set(0, -Math.PI / 2, 0); 
+      const coverQuat = coverDummy.quaternion.clone();
 
-        // 4. Camera & Controls
-        if (cameraRef.current && controlsRef.current) {
-            cameraRef.current.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
-            controlsRef.current.target.lerpVectors(controlsStartTarget, controlsTarget, ease);
-            cameraRef.current.lookAt(controlsRef.current.target);
-        }
+      // [수정] 바이닐 각도 조정 (누워있는 문제 해결)
+      // 커버와 같은 기본 회전에서 Z축으로 -90도 회전시켜 세움
+      const vinylDummy = new THREE.Object3D();
+      vinylDummy.rotation.set(0, -Math.PI / 2, 0); 
+      vinylDummy.rotateZ(-Math.PI / 2); // 세우기
+      const vinylQuat = vinylDummy.quaternion.clone();
 
-        if (progress < 1) requestAnimationFrame(loop);
-        else isTransitioningRef.current = false;
-    };
-    loop();
+      return { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat };
+  };
+
+  const animateSelection = (id: number) => {
+      const targetLP = lpObjectsRef.current.find(lp => lp.id === id);
+      if (!targetLP || !sceneRef.current || !cameraRef.current) return;
+
+      isTransitioningRef.current = true;
+      if (controlsRef.current) controlsRef.current.enabled = false;
+
+      // 1. 상태 저장 및 Scene Attach
+      [targetLP.mesh, targetLP.vinyl].forEach(obj => {
+          if (obj) {
+              initialStatesRef.current.set(obj, {
+                  parent: obj.parent,
+                  pos: obj.position.clone(),
+                  quat: obj.quaternion.clone(),
+                  scale: obj.scale.clone()
+              });
+              sceneRef.current!.attach(obj);
+          }
+      });
+
+      // 2. 타겟 계산
+      const { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat } = getTargetTransform();
+
+      // 3. 카메라 타겟 state
+      const startCamPos = cameraRef.current.position.clone();
+      const startCamQuat = cameraRef.current.quaternion.clone();
+      
+      const endCamDummy = cameraRef.current.clone();
+      endCamDummy.position.copy(FOCUS_CAMERA_POS);
+      endCamDummy.lookAt(FOCUS_LOOK_AT);
+      const endCamQuat = endCamDummy.quaternion.clone();
+
+      const startState = {
+          meshPos: targetLP.mesh.position.clone(),
+          meshQuat: targetLP.mesh.quaternion.clone(),
+          vPos: targetLP.vinyl ? targetLP.vinyl.position.clone() : new THREE.Vector3(),
+          vQuat: targetLP.vinyl ? targetLP.vinyl.quaternion.clone() : new THREE.Quaternion(),
+      };
+
+      const wrapperStartScale = initialWrapperScaleRef.current;
+      const duration = 1000;
+      const startTime = Date.now();
+
+      const loop = () => {
+          const progress = Math.min((Date.now() - startTime) / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 4);
+
+          // A. Camera Animation
+          if (cameraRef.current) {
+              cameraRef.current.position.lerpVectors(startCamPos, FOCUS_CAMERA_POS, ease);
+              cameraRef.current.quaternion.slerpQuaternions(startCamQuat, endCamQuat, ease);
+          }
+
+          // B. Wrapper Animation (Hide)
+          if (modelWrapperRef.current) {
+              const currentScale = wrapperStartScale * (1 - ease);
+              modelWrapperRef.current.scale.setScalar(currentScale);
+              modelWrapperRef.current.position.y = -20 * ease; 
+              if (progress > 0.95) modelWrapperRef.current.visible = false;
+          }
+
+          // C. LP Animation
+          targetLP.mesh.position.lerpVectors(startState.meshPos, coverTargetPos, ease);
+          targetLP.mesh.quaternion.slerpQuaternions(startState.meshQuat, coverQuat, ease);
+          
+          if (targetLP.vinyl) {
+              targetLP.vinyl.position.lerpVectors(startState.vPos, vinylTargetPos, ease);
+              targetLP.vinyl.quaternion.slerpQuaternions(startState.vQuat, vinylQuat, ease);
+          }
+
+          if (progress < 1) requestAnimationFrame(loop);
+          else {
+              isTransitioningRef.current = false;
+              if (controlsRef.current) {
+                  controlsRef.current.target.copy(FOCUS_LOOK_AT);
+                  controlsRef.current.update();
+              }
+          }
+      };
+      loop();
   };
 
   const animateClose = () => {
-    isTransitioningRef.current = true;
-    
-    const duration = 1000;
-    const startTime = Date.now();
+      const targets: THREE.Object3D[] = [];
+      initialStatesRef.current.forEach((_, obj) => targets.push(obj));
+      
+      if (targets.length === 0) {
+          if (modelWrapperRef.current) {
+              modelWrapperRef.current.visible = true;
+              modelWrapperRef.current.scale.setScalar(initialWrapperScaleRef.current);
+              modelWrapperRef.current.position.y = 0;
+          }
+          return;
+      }
+      
+      isTransitioningRef.current = true;
+      const duration = 800;
+      const startTime = Date.now();
 
-    const currentPositions = new Map<THREE.Object3D, { pos: THREE.Vector3, quat: THREE.Quaternion, scale: THREE.Vector3 }>();
-    initialStatesRef.current.forEach((_, obj) => {
-        currentPositions.set(obj, {
-            pos: obj.position.clone(),
-            quat: obj.quaternion.clone(),
-            scale: obj.scale.clone()
-        });
-    });
+      if (modelWrapperRef.current) {
+          modelWrapperRef.current.visible = true;
+      }
+      const targetWrapperScale = initialWrapperScaleRef.current;
+      
+      const startCamPos = cameraRef.current!.position.clone();
+      const startCamQuat = cameraRef.current!.quaternion.clone();
+      
+      const endCamDummy = cameraRef.current!.clone();
+      endCamDummy.position.copy(DEFAULT_CAMERA_POS);
+      endCamDummy.lookAt(0,0,0);
+      const endCamQuat = endCamDummy.quaternion.clone();
 
-    const cameraStartPos = cameraRef.current!.position.clone();
-    const cameraTargetPos = new THREE.Vector3(5, 3, 6); 
+      const startLocalStates = targets.map(obj => ({
+          obj,
+          pos: obj.position.clone(),
+          quat: obj.quaternion.clone(),
+      }));
 
-    const controlsStartTarget = controlsRef.current!.target.clone();
-    const controlsTarget = new THREE.Vector3(0, 0, 0);
+      const loop = () => {
+          const progress = Math.min((Date.now() - startTime) / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 4);
 
-    const loop = () => {
-        const progress = Math.min((Date.now() - startTime) / duration, 1);
-        const ease = 1 - Math.pow(1 - progress, 4);
+          // A. Camera Reset
+          if (cameraRef.current) {
+               cameraRef.current.position.lerpVectors(startCamPos, DEFAULT_CAMERA_POS, ease);
+               cameraRef.current.quaternion.slerpQuaternions(startCamQuat, endCamQuat, ease);
+          }
 
-        initialStatesRef.current.forEach((init, obj) => {
-            const current = currentPositions.get(obj)!;
-            
-            obj.position.lerpVectors(current.pos, init.pos, ease);
-            obj.quaternion.slerpQuaternions(current.quat, init.quat, ease);
-            obj.scale.lerpVectors(current.scale, init.scale, ease);
-        });
+          // B. Wrapper Reset
+          if (modelWrapperRef.current) {
+               modelWrapperRef.current.scale.setScalar(targetWrapperScale * ease);
+               modelWrapperRef.current.position.y = -20 * (1 - ease);
+          }
+          
+          const currentWrapperScale = targetWrapperScale * ease;
 
-        if (cameraRef.current && controlsRef.current) {
-            cameraRef.current.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
-            controlsRef.current.target.lerpVectors(controlsStartTarget, controlsTarget, ease);
-            cameraRef.current.lookAt(controlsRef.current.target);
-        }
+          // C. Object Return
+          targets.forEach((obj, i) => {
+               const init = initialStatesRef.current.get(obj)!;
+               const start = startLocalStates[i];
+               
+               obj.quaternion.slerpQuaternions(start.quat, init.quat, ease);
+               
+               const targetWorldPos = init.pos.clone().multiplyScalar(currentWrapperScale);
+               targetWorldPos.y += (-20 * (1 - ease));
 
-        if (progress < 1) {
-            requestAnimationFrame(loop);
-        } else {
-            isTransitioningRef.current = false;
-            if(controlsRef.current) controlsRef.current.enabled = true;
-        }
-    };
-    loop();
+               obj.position.lerpVectors(start.pos, targetWorldPos, ease);
+          });
+
+          if (progress < 1) requestAnimationFrame(loop);
+          else {
+              targets.forEach(obj => restoreObject(obj));
+              initialStatesRef.current.clear();
+              
+              if (controlsRef.current) {
+                  controlsRef.current.enabled = true;
+                  controlsRef.current.target.set(0,0,0);
+                  controlsRef.current.update();
+              }
+              isTransitioningRef.current = false;
+          }
+      };
+      loop();
   };
 
-  return <div ref={containerRef} className="fixed left-0 md:left-[50px] top-1/2 -translate-y-1/2 w-full md:w-[840px] h-full md:h-[840px] z-10 animate-slideInLeft" />;
+  const animateSwitch = (prevId: number, nextId: number) => {
+      const prevLP = lpObjectsRef.current.find(lp => lp.id === prevId);
+      const nextLP = lpObjectsRef.current.find(lp => lp.id === nextId);
+
+      if (!prevLP || !nextLP || !sceneRef.current) return;
+      
+      // Cleanup Previous
+      [prevLP.mesh, prevLP.vinyl].forEach(obj => {
+          if(obj) restoreObject(obj);
+      });
+      initialStatesRef.current.forEach((val, key) => {
+          if (key === prevLP.mesh || key === prevLP.vinyl) {
+              initialStatesRef.current.delete(key);
+          }
+      });
+
+      // Setup Next
+      [nextLP.mesh, nextLP.vinyl].forEach(obj => {
+          if (obj) {
+              initialStatesRef.current.set(obj, {
+                  parent: obj.parent,
+                  pos: obj.position.clone(),
+                  quat: obj.quaternion.clone(),
+                  scale: obj.scale.clone()
+              });
+              sceneRef.current!.attach(obj);
+              obj.position.set(0, 0, 6); // Start from Z=6 (match target Z)
+              obj.scale.setScalar(0);
+          }
+      });
+
+      // Targets
+      const { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat } = getTargetTransform();
+
+      const duration = 600;
+      const startTime = Date.now();
+      
+      const loop = () => {
+          const progress = Math.min((Date.now() - startTime) / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 3);
+
+          nextLP.mesh.scale.setScalar(ease);
+          nextLP.mesh.position.lerpVectors(new THREE.Vector3(0,0,6), coverTargetPos, ease);
+          nextLP.mesh.quaternion.slerpQuaternions(new THREE.Quaternion(), coverQuat, ease);
+
+          if (nextLP.vinyl) {
+              nextLP.vinyl.scale.setScalar(ease);
+              nextLP.vinyl.position.lerpVectors(new THREE.Vector3(0,0,6), vinylTargetPos, ease);
+              nextLP.vinyl.quaternion.slerpQuaternions(new THREE.Quaternion(), vinylQuat, ease);
+          }
+          
+          if (cameraRef.current) {
+               cameraRef.current.position.lerpVectors(cameraRef.current.position, FOCUS_CAMERA_POS, 0.1);
+               cameraRef.current.lookAt(FOCUS_LOOK_AT);
+          }
+
+          if (progress < 1) requestAnimationFrame(loop);
+      };
+      loop();
+  };
+
+  return <div ref={containerRef} className="fixed left-0 md:left-[50px] top-1/2 -translate-y-1/2 w-full md:w-[840px] h-full md:h-[840px] z-10 animate-slideInLeft cursor-pointer" />;
 };
 
-export default ThreeController;
+export default ThreeController;``
