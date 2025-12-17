@@ -249,7 +249,7 @@ const InfoPage: React.FC<InfoPageProps> = ({ onThemeChange }) => {
     const id = i + 1;
     const isVideo = id === 2 || id === 9;
     const ext = isVideo ? 'mp4' : 'png';
-    return { id, isVideo, src: `/public/info-${id}.${ext}` };
+    return { id, isVideo, src: `/info-${id}.${ext}` };
   }), []);
 
   // Pre-calculate accumulated widths for parallax logic
@@ -523,7 +523,7 @@ const InfoPage: React.FC<InfoPageProps> = ({ onThemeChange }) => {
                     />
                     {isTargetForBubby && (
                         <img 
-                            src="/public/info-bubby.png" 
+                            src="/info-bubby.png" 
                             alt="Bubby Decoration"
                             className="absolute z-10 pointer-events-none max-w-none" 
                             style={{ 
@@ -610,7 +610,7 @@ const InfoPage: React.FC<InfoPageProps> = ({ onThemeChange }) => {
                          <div className="w-[200px] flex-shrink-0 flex flex-col h-full">
                             {/* Profile Image */}
                             <div className="w-full aspect-[4/5] bg-gray-200 overflow-hidden mb-6 shadow-sm flex-shrink-0">
-                                 <img src="/public/info-profile.png" alt="Profile" className="w-full h-full object-cover" 
+                                 <img src="/info-profile.png" alt="Profile" className="w-full h-full object-cover" 
                                       onError={(e) => e.currentTarget.style.display='none'} 
                                  /> 
                             </div>
