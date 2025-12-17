@@ -3,7 +3,11 @@ import { PROJECTS } from '../constants';
 import ThreeController from '../components/ThreeController';
 import PlaylistPanel from '../components/PlaylistPanel';
 
-const WorkPage: React.FC = () => {
+interface WorkPageProps {
+  onModelLoaded?: () => void;
+}
+
+const WorkPage: React.FC<WorkPageProps> = ({ onModelLoaded }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
   const currentProject = selectedProjectId 
@@ -12,7 +16,7 @@ const WorkPage: React.FC = () => {
 
   return (
     <>
-      {/* Dynamic Background Layers - Smooth Transition */}
+      {/* Background Layers */}
       {PROJECTS.map((project) => (
         <div 
            key={project.id}
@@ -25,13 +29,14 @@ const WorkPage: React.FC = () => {
         />
       ))}
       
-      {/* 3D Scene */}
+      {/* 3D Scene - Pass loading callback */}
       <ThreeController 
         selectedId={selectedProjectId} 
         onLPSelect={(id) => setSelectedProjectId(id)}
+        onLoadComplete={onModelLoaded}
       />
 
-      {/* Right Side UI Panel */}
+      {/* UI Panel */}
       <PlaylistPanel 
         currentProject={currentProject}
         onSelectProject={(id) => setSelectedProjectId(id)}

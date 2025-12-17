@@ -1,13 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
-// ▼▼▼ 로딩 화면 배경 이미지 경로를 여기서 수정하세요 ▼▼
+// ▼▼▼ 로딩 화면 배경 이미지 경로 ▼▼
 const LOADING_BG_PATH = "/background.png";
 
 interface LoadingScreenProps {
   onComplete: () => void;
+  isAssetLoaded: boolean;
 }
 
-const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
+const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete, isAssetLoaded }) => {
   // DOM Refs
   const lpCircleRef = useRef<HTMLDivElement>(null);
   const gaugeProgressRef = useRef<SVGCircleElement>(null);
@@ -22,9 +23,10 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
     currentX: window.innerWidth / 2,
     currentY: window.innerHeight / 2,
     virtualScrollY: 0,
-    loadingComplete: false,
-    mainTransitionComplete: false,
+    loadingComplete: false,       // 게이지가 100% 찼는지
+    mainTransitionComplete: false, // 전체 화면 전환 애니메이션이 시작됐는지
     isMouseMoved: false,
+    waitingForAsset: false,       // 게이지는 찼으나 에셋 로딩 대기중
   });
 
   const SCROLL_SPEED = 1.5;
@@ -36,7 +38,38 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isGaugeFaded, setIsGaugeFaded] = useState(false);
   const [isMouseVisible, setIsMouseVisible] = useState(false);
+  const [showLoadingText, setShowLoadingText] = useState(false); // 3D 로딩 텍스트 표시 여부
 
+  // 1. Define actions using useCallback to be accessible in effects
+  const completeLoading = useCallback(() => {
+        setIsGaugeFaded(true);
+        if (welcomeTextRef.current) welcomeTextRef.current.style.display = 'none';
+        setShowLoadingText(false); // Hide loading text if visible
+        
+        setTimeout(() => {
+            setIsExpanding(true);
+        }, 100);
+  }, []);
+
+  const enterMainSection = useCallback(() => {
+        setIsFullScreen(true);
+        setTimeout(() => {
+            onComplete();
+        }, 1000); 
+  }, [onComplete]);
+
+  // 2. Watch for Asset Loading Completion (if waiting)
+  useEffect(() => {
+      // 사용자가 이미 스크롤을 다 내렸고(waitingForAsset), 에셋이 이제 로드되었다면(isAssetLoaded)
+      if (stateRef.current.waitingForAsset && isAssetLoaded && !stateRef.current.loadingComplete) {
+          stateRef.current.loadingComplete = true;
+          stateRef.current.waitingForAsset = false;
+          setShowLoadingText(false);
+          completeLoading();
+      }
+  }, [isAssetLoaded, completeLoading]);
+
+  // 3. User Interaction Effect
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       stateRef.current.mouseX = e.clientX;
@@ -55,9 +88,11 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
       state.virtualScrollY += e.deltaY * SCROLL_SPEED;
       state.virtualScrollY = Math.max(0, state.virtualScrollY);
 
+      // --- Phase 1: Filling the Gauge ---
       if (!state.loadingComplete) {
         const scrollProgress = Math.min(state.virtualScrollY / LOADING_SCROLL_HEIGHT, 1);
 
+        // UI Update
         if (gaugeProgressRef.current) {
             const offset = CIRCUMFERENCE - (scrollProgress * CIRCUMFERENCE);
             gaugeProgressRef.current.style.strokeDashoffset = offset.toString();
@@ -68,16 +103,50 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
             blurImgRef.current.style.filter = `blur(${blurAmount}px)`;
         }
 
+        // Welcome Text Opacity Control
         if (welcomeTextRef.current) {
-            welcomeTextRef.current.style.opacity = (1 - scrollProgress).toString();
+            // Priority: If waiting for asset (3D loading text shown), force Hide Welcome Text
+            if (state.waitingForAsset) {
+                welcomeTextRef.current.style.opacity = '0';
+                welcomeTextRef.current.style.display = 'none';
+            } else {
+                welcomeTextRef.current.style.display = 'block';
+                welcomeTextRef.current.style.opacity = (1 - scrollProgress).toString();
+            }
         }
 
+        // Check completion (Gauge Full)
         if (scrollProgress >= 1) {
-            state.loadingComplete = true;
-            completeLoading();
+            if (isAssetLoaded) {
+                // Asset is ready -> Proceed immediately
+                state.loadingComplete = true;
+                completeLoading();
+            } else {
+                // Asset NOT ready -> Wait
+                if (!state.waitingForAsset) {
+                    state.waitingForAsset = true;
+                    setShowLoadingText(true);
+                    // Force hide welcome text immediately upon state change
+                    if (welcomeTextRef.current) {
+                        welcomeTextRef.current.style.opacity = '0';
+                        welcomeTextRef.current.style.display = 'none';
+                    }
+                }
+            }
+        } else {
+            // User scrolled back up - reset waiting state
+            if (state.waitingForAsset) {
+                state.waitingForAsset = false;
+                setShowLoadingText(false);
+                if (welcomeTextRef.current) {
+                    welcomeTextRef.current.style.display = 'block';
+                }
+            }
         }
       } 
+      // --- Phase 2: Expanding to Main ---
       else if (!state.mainTransitionComplete) {
+         // This runs only if loadingComplete became true (Asset Loaded)
          const additionalScroll = state.virtualScrollY - LOADING_SCROLL_HEIGHT;
          const mainProgress = Math.min(additionalScroll / MAIN_SCROLL_HEIGHT, 1);
 
@@ -88,25 +157,10 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
       }
     };
 
-    const completeLoading = () => {
-        setIsGaugeFaded(true);
-        if (welcomeTextRef.current) welcomeTextRef.current.style.display = 'none';
-        
-        setTimeout(() => {
-            setIsExpanding(true);
-        }, 100);
-    };
-
-    const enterMainSection = () => {
-        setIsFullScreen(true);
-        setTimeout(() => {
-            onComplete();
-        }, 1000); 
-    };
-
     let rafId: number;
     const updatePosition = () => {
         const state = stateRef.current;
+        // Stop circle movement when transition starts to avoid jitter
         if (!state.mainTransitionComplete) {
             state.currentX += (state.mouseX - state.currentX) * 0.1;
             state.currentY += (state.mouseY - state.currentY) * 0.1;
@@ -128,25 +182,69 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
         window.removeEventListener('wheel', handleWheel);
         cancelAnimationFrame(rafId);
     };
-  }, [onComplete, CIRCUMFERENCE]);
+  }, [CIRCUMFERENCE, isAssetLoaded, completeLoading, enterMainSection]);
 
   return (
-    <section id="loading-section">
+    <section 
+        id="loading-section" 
+        className="bg-gradient-to-br from-[#f3e7ff] to-[#e0c3fc]"
+        style={{ background: 'linear-gradient(135deg, #f3e7ff 0%, #e0c3fc 100%)' }}
+    >
+        <style>{`
+          @keyframes jump {
+            0%, 40%, 100% { transform: translateY(0); }
+            20% { transform: translateY(-8px); }
+          }
+          .dot {
+            display: inline-block;
+            animation: jump 1.2s infinite ease-in-out;
+          }
+        `}</style>
+        
         <div className="blur-background">
             <img 
                 ref={blurImgRef}
                 src={LOADING_BG_PATH}
                 alt="Background" 
                 className="bg_img"
-                onError={(e) => {
-                    // 이미지가 없을 경우 숨김 처리 (CSS 그라디언트가 보임)
-                    e.currentTarget.style.display = 'none';
-                }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
         </div>
 
-        <div className="welcome-text" ref={welcomeTextRef}>
-            <p className="text-2xl md:text-3xl leading-relaxed">Welcome to my website!<br />Please Scroll to enter.</p>
+        {/* Original Welcome Text */}
+        <div 
+            className="welcome-text" 
+            ref={welcomeTextRef}
+            // Double ensure it hides via style prop if React re-renders with showLoadingText=true
+            style={{ 
+                opacity: showLoadingText ? 0 : undefined,
+                display: showLoadingText ? 'none' : 'block'
+            }}
+        >
+            <p className="text-2xl md:text-3xl leading-relaxed font-medium">
+                Welcome to my website!<br />Please Scroll to enter.
+            </p>
+        </div>
+
+        {/* 3D Loading Text (Replaces Welcome text at 100% scroll if needed) */}
+        <div 
+            className="welcome-text"
+            style={{ 
+                opacity: showLoadingText ? 1 : 0, 
+                visibility: showLoadingText ? 'visible' : 'hidden',
+                animation: 'none', // Disable blink for this state
+                pointerEvents: 'none',
+                transition: 'opacity 0.3s ease'
+            }}
+        >
+            <div className="bg-white/80 backdrop-blur-md px-8 py-4 rounded-full shadow-lg border border-white/50 inline-block">
+                <p className="text-xl md:text-2xl leading-none font-bold text-[#9333EA] tracking-wide">
+                    3D file loading
+                    <span className="dot" style={{ animationDelay: '0s', marginLeft: '4px' }}>.</span>
+                    <span className="dot" style={{ animationDelay: '0.2s' }}>.</span>
+                    <span className="dot" style={{ animationDelay: '0.4s' }}>.</span>
+                </p>
+            </div>
         </div>
 
         <div 
@@ -188,8 +286,10 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
                 />
             </svg>
 
-            <div className="center-circle">
-                <p className="lp-typo">KIMKAKYUNG</p>
+            <div className="center-circle relative">
+                <p className="lp-typo">
+                    KIMKAKYUNG
+                </p>
             </div>
         </div>
     </section>

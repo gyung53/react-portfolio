@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -8,6 +8,7 @@ import { LPObject } from '../types';
 interface ThreeControllerProps {
   onLPSelect: (id: number) => void;
   selectedId: number | null;
+  onLoadComplete?: () => void;
 }
 
 interface InitialState {
@@ -17,13 +18,43 @@ interface InitialState {
     scale: THREE.Vector3;
 }
 
-// [상수 정의]
-// [수정] 기본 카메라 위치 조정 (Zoom In: Z 11 -> 10)
 const DEFAULT_CAMERA_POS = new THREE.Vector3(8.5, 4, 5); 
 const FOCUS_CAMERA_POS = new THREE.Vector3(0, 0, 10.5);   
 const FOCUS_LOOK_AT = new THREE.Vector3(0, 0, 0);       
 
-const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedId }) => {
+THREE.Cache.enabled = true;
+
+// Singleton Loaders
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+dracoLoader.setDecoderConfig({ type: 'js' }); 
+
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+
+// 전역 로딩 프로미스 (컴포넌트 마운트 전 시작)
+let globalModelPromise: Promise<THREE.Group> | null = null;
+
+const startPreloading = () => {
+    if (!globalModelPromise) {
+        globalModelPromise = new Promise((resolve, reject) => {
+            gltfLoader.load(
+                '/LP.glb',
+                (gltf) => {
+                    resolve(gltf.scene);
+                },
+                undefined,
+                (err) => reject(err)
+            );
+        });
+    }
+    return globalModelPromise;
+};
+
+// 즉시 로딩 시작
+startPreloading();
+
+const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedId, onLoadComplete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Three.js Core Refs
@@ -41,7 +72,7 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
   
   // Logic Refs
   const isTransitioningRef = useRef(false);
-  const activeIdRef = useRef<number | null>(null); // 현재 화면에 나와있는 LP ID 트래킹
+  const activeIdRef = useRef<number | null>(null);
   const animationFrameRef = useRef<number>(0);
   const pointerDownRef = useRef<{x: number, y: number} | null>(null);
 
@@ -91,8 +122,8 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     controls.target.set(0, 0, 0); 
     controlsRef.current = controls;
 
-    // Model Loader
-    loadModel(scene);
+    // 모델 로드 처리
+    handleModelLoad(scene);
 
     // Events
     const onResize = () => {
@@ -139,63 +170,69 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     };
   }, []);
 
-  // 2. 모델 로드
-  const loadModel = (scene: THREE.Scene) => {
-    const loader = new GLTFLoader();
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-    loader.setDRACOLoader(dracoLoader);
+  const handleModelLoad = (scene: THREE.Scene) => {
+      // Use the global promise ensuring we don't re-download
+      startPreloading()!
+        .then((model) => {
+            console.log("✅ GLB Processed in Scene");
+            
+            // Clone if needed, but for singleton scene just use it
+            // Reset transforms just in case
+            model.position.set(0,0,0);
+            model.rotation.set(0,0,0);
+            model.scale.set(1,1,1);
 
-    loader.load(
-      '/LP.glb',
-      (gltf) => {
-        console.log("✅ GLB Loaded");
-        const model = gltf.scene;
-        
-        model.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-                const mesh = child as THREE.Mesh;
-                if (mesh.material) {
-                    if (Array.isArray(mesh.material)) {
-                        mesh.material.forEach(m => m.side = THREE.DoubleSide);
-                    } else {
-                        mesh.material.side = THREE.DoubleSide;
+            model.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    const mesh = child as THREE.Mesh;
+                    if (mesh.material) {
+                        if (Array.isArray(mesh.material)) {
+                            mesh.material.forEach(m => m.side = THREE.DoubleSide);
+                        } else {
+                            mesh.material.side = THREE.DoubleSide;
+                        }
                     }
                 }
+            });
+
+            modelWrapperRef.current.clear();
+            scene.add(modelWrapperRef.current);
+            modelWrapperRef.current.add(model);
+
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+
+            model.position.x = -center.x;
+            model.position.y = -center.y;
+            model.position.z = -center.z;
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (maxDim > 0) {
+                const scale = 4.5 / maxDim;
+                modelWrapperRef.current.scale.setScalar(scale);
+                initialWrapperScaleRef.current = scale;
             }
+
+            identifyLPObjects(model);
+
+            // Notify Parent that loading is DONE
+            if (onLoadComplete) onLoadComplete();
+        })
+        .catch(err => {
+            console.error("Failed to load model", err);
+            // Even on error, notify complete so UI doesn't hang
+            if (onLoadComplete) onLoadComplete();
         });
-
-        scene.add(modelWrapperRef.current);
-        modelWrapperRef.current.add(model);
-
-        const box = new THREE.Box3().setFromObject(model);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-
-        model.position.x = -center.x;
-        model.position.y = -center.y;
-        model.position.z = -center.z;
-
-        // 초기 크기 (4.5)
-        const maxDim = Math.max(size.x, size.y, size.z);
-        if (maxDim > 0) {
-            const scale = 4.5 / maxDim;
-            modelWrapperRef.current.scale.setScalar(scale);
-            initialWrapperScaleRef.current = scale;
-        }
-
-        identifyLPObjects(model);
-      },
-      undefined,
-      (err) => console.error("❌ Loading Error:", err)
-    );
   };
 
   const identifyLPObjects = (model: THREE.Object3D) => {
     const foundLPs: Record<number, THREE.Mesh> = {};
     const foundVinyls: Record<number, THREE.Object3D> = {};
+    
+    lpObjectsRef.current = [];
 
     const vinylRegex = /^Vinyl[_\s-]*0?(\d+)/i;    
     const coverRegex = /^LP[_\s-]*Cover[_\s-]*0?(\d+)/i; 
@@ -228,7 +265,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     });
   };
 
-  // 3. 클릭 핸들러
   const handleClick = (event: PointerEvent) => {
       if (selectedId !== null) return;
       if (isTransitioningRef.current || !rendererRef.current || !cameraRef.current || !sceneRef.current) return;
@@ -254,7 +290,7 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
       }
   };
 
-  // 4. 애니메이션 제어
+  // Animation Logic (Same as before)
   useEffect(() => {
     const prevId = activeIdRef.current;
     const nextId = selectedId;
@@ -270,12 +306,11 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
     activeIdRef.current = nextId;
   }, [selectedId]);
 
-  // --- Animation Logic ---
-
+  // ... (animateSelection, animateClose, animateSwitch code remains identical) ...
   const restoreObject = (obj: THREE.Object3D) => {
       const init = initialStatesRef.current.get(obj);
       if (init && init.parent) {
-          init.parent.add(obj); // Changed to add to avoid zero-scale matrix inversion issues
+          init.parent.add(obj); 
           obj.position.copy(init.pos);
           obj.quaternion.copy(init.quat);
           obj.scale.copy(init.scale);
@@ -314,7 +349,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           offsetVector.copy(obj.worldToLocal(center));
       }
 
-      // obj.scale is already set to targetScale in animateSwitch
       offsetVector.multiply(obj.scale);
 
       const rotatedOffset = offsetVector.clone().applyQuaternion(targetQuat);
@@ -512,13 +546,8 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
                   scale: obj.scale.clone()
               });
               
-              // CRITICAL FIX: Use add() instead of attach()
-              // attach() attempts to preserve world transform. 
-              // Since parent (modelWrapper) is scaled to ~0, the world transform is collapsed.
-              // Inverting this collapsed matrix results in Infinity/NaN.
               sceneRef.current!.add(obj);
               
-              // Force visibility and set scale for calculation
               obj.visible = true;
               const targetScale = (obj === nextLP.vinyl) ? vinylTargetScale : meshTargetScale;
               obj.scale.copy(targetScale);
@@ -526,7 +555,7 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           }
       });
 
-      // 3. Calculate Targets (now that scale is correct in world)
+      // 3. Calculate Targets
       const { coverVisualPos, vinylVisualPos, coverQuat, vinylQuat } = getTargetTransform();
       
       const coverTargetPos = getAdjustedPosition(nextLP.mesh, coverVisualPos, coverQuat);
@@ -575,7 +604,12 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
       loop();
   };
 
-  return <div ref={containerRef} className="fixed left-0 md:left-[50px] top-1/2 -translate-y-1/2 w-full md:w-[840px] h-full md:h-[840px] z-10 animate-slideInLeft cursor-pointer" />;
+  return (
+    <div 
+        ref={containerRef} 
+        className="fixed left-0 md:left-[50px] top-1/2 -translate-y-1/2 w-full md:w-[840px] h-full md:h-[840px] z-10 animate-slideInLeft cursor-pointer" 
+    />
+  );
 };
 
 export default ThreeController;
