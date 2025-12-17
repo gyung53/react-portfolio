@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+export interface ProjectLink {
+  title: string;
+  url: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -9,9 +14,7 @@ export interface Project {
   overview: string;
   startDate: string;
   endDate: string;
-  landingUrl: string;
-  prototypeUrl: string;
-  codeUrl?: string; // Optional field for code review link
+  links: ProjectLink[]; // Replaced fixed urls with dynamic links
 }
 
 export interface LPObject {

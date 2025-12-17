@@ -188,34 +188,23 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
                     {currentProject.overview}
                 </div>
 
-                <div className="flex gap-2.5 mt-auto pt-4 border-t border-gray-100">
-                    <a
-                        href={currentProject.landingUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-primary text-white hover:bg-purple-700 hover:-translate-y-0.5 transition-all shadow-md"
-                    >
-                        Landing Page ↗
-                    </a>
-                    <a
-                        href={currentProject.prototypeUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 hover:-translate-y-0.5 transition-all"
-                    >
-                        Prototype ↗
-                    </a>
-                    {/* 3rd Button (Conditionally Rendered) */}
-                    {currentProject.codeUrl && (
-                        <a
-                            href={currentProject.codeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-1 text-center px-4 py-2.5 rounded-xl text-[13px] font-bold bg-black text-white hover:bg-gray-800 hover:-translate-y-0.5 transition-all shadow-md"
-                        >
-                            Code ↗
-                        </a>
-                    )}
+                <div className="flex flex-wrap gap-2.5 mt-auto pt-4 border-t border-gray-100">
+                    {currentProject.links.map((link, index) => {
+                        // All buttons now share the same Unified Style: Black default (#555555), Primary on Hover
+                        const btnClass = "flex-1 flex items-center justify-center px-2 py-2 rounded-xl text-[13px] font-bold transition-all shadow-md min-w-[45%] bg-[#333333] text-white hover:bg-primary hover:-translate-y-0.5";
+                        
+                        return (
+                            <a
+                                key={index}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={btnClass}
+                            >
+                                {link.title} ↗
+                            </a>
+                        );
+                    })}
                 </div>
             </>
         )}

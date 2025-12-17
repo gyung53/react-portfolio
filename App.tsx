@@ -33,7 +33,7 @@ function App() {
 
       {/* Header / Logo */}
       <div className="fixed top-5 left-8 md:left-20 z-50 transition-colors duration-300">
-        <h1 className={`text-3xl md:text-5xl font-bold tracking-widest ${headerTextColor}`}>
+        <h1 className={`text-[34px] md:text-[52px] font-black tracking-normal ${headerTextColor}`}>
             <Link to="/">KAKYUNG KIM</Link>
         </h1>
       </div>
