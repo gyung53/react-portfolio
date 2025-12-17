@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-// ▼▼▼ 로딩 화면 배경 이미지 경로를 여기서 수정하세요 ▼▼▼
-const LOADING_BG_PATH = "/public/background.png";
+// ▼▼▼ 로딩 화면 배경 이미지 경로를 여기서 수정하세요 ▼▼
+const LOADING_BG_PATH = "/background.png";
 
 interface LoadingScreenProps {
   onComplete: () => void;
