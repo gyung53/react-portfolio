@@ -18,9 +18,9 @@ interface InitialState {
 }
 
 // [상수 정의]
-const DEFAULT_CAMERA_POS = new THREE.Vector3(3, 2, 11); // 탐색 시 카메라 위치
-// [수정] 줌아웃을 위해 Z값 증가 (12 -> 17)
-const FOCUS_CAMERA_POS = new THREE.Vector3(0, 0, 14.5);   
+// [수정] 기본 카메라 위치 조정 (Zoom In: Z 11 -> 10)
+const DEFAULT_CAMERA_POS = new THREE.Vector3(8.5, 4, 5); 
+const FOCUS_CAMERA_POS = new THREE.Vector3(0, 0, 10.5);   
 const FOCUS_LOOK_AT = new THREE.Vector3(0, 0, 0);       
 
 const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedId }) => {
@@ -218,17 +218,18 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
             id,
             mesh,
             vinyl,
-            originalPosition: new THREE.Vector3(),
-            originalRotation: new THREE.Quaternion(),
-            originalScale: new THREE.Vector3(),
-            vinylOriginalPosition: null, vinylOriginalRotation: null, vinylOriginalScale: null
+            originalPosition: mesh.position.clone(),
+            originalRotation: mesh.quaternion.clone(),
+            originalScale: mesh.scale.clone(),
+            vinylOriginalPosition: vinyl ? vinyl.position.clone() : null,
+            vinylOriginalRotation: vinyl ? vinyl.quaternion.clone() : null,
+            vinylOriginalScale: vinyl ? vinyl.scale.clone() : null
         });
     });
   };
 
   // 3. 클릭 핸들러
   const handleClick = (event: PointerEvent) => {
-      // 선택 모드일 때는 클릭 무시 (UI 패널로 제어)
       if (selectedId !== null) return;
       if (isTransitioningRef.current || !rendererRef.current || !cameraRef.current || !sceneRef.current) return;
 
@@ -253,19 +254,16 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
       }
   };
 
-  // 4. 애니메이션 제어 (State Change Handler)
+  // 4. 애니메이션 제어
   useEffect(() => {
     const prevId = activeIdRef.current;
     const nextId = selectedId;
 
     if (prevId === null && nextId !== null) {
-        // [Open] Shelf -> LP
         animateSelection(nextId);
     } else if (prevId !== null && nextId === null) {
-        // [Close] LP -> Shelf
         animateClose();
     } else if (prevId !== null && nextId !== null && prevId !== nextId) {
-        // [Switch] LP A -> LP B
         animateSwitch(prevId, nextId);
     }
 
@@ -274,36 +272,53 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
 
   // --- Animation Logic ---
 
-  // [Common] Restore Object Helper
   const restoreObject = (obj: THREE.Object3D) => {
       const init = initialStatesRef.current.get(obj);
       if (init && init.parent) {
-          init.parent.attach(obj);
+          init.parent.add(obj); // Changed to add to avoid zero-scale matrix inversion issues
           obj.position.copy(init.pos);
           obj.quaternion.copy(init.quat);
           obj.scale.copy(init.scale);
       }
   };
 
-  // [Helper] 타겟 좌표 및 회전값 계산
   const getTargetTransform = () => {
-      // [수정] Z 위치를 10 -> 6으로 변경 (카메라 17과의 거리 확보하여 줌아웃 효과)
-      // [수정] X 간격을 넓힘 (-0.65 -> -1.6)
-      const coverTargetPos = new THREE.Vector3(-0.4, 0, 6); 
-      const vinylTargetPos = new THREE.Vector3(0.6, 0, 5.5);
+      const coverVisualPos = new THREE.Vector3(-0.6, 0, 6); 
+      const vinylVisualPos = new THREE.Vector3(0.8, 0, 5.5);
       
       const coverDummy = new THREE.Object3D();
-      coverDummy.rotation.set(0, -Math.PI / 2, 0); 
+      coverDummy.rotation.set(0, -Math.PI / 2 - 0.35, 0); 
       const coverQuat = coverDummy.quaternion.clone();
 
-      // [수정] 바이닐 각도 조정 (누워있는 문제 해결)
-      // 커버와 같은 기본 회전에서 Z축으로 -90도 회전시켜 세움
       const vinylDummy = new THREE.Object3D();
-      vinylDummy.rotation.set(0, -Math.PI / 2, 0); 
-      vinylDummy.rotateZ(-Math.PI / 2); // 세우기
+      vinylDummy.rotation.set(0, Math.PI / 2, 0); 
+      vinylDummy.rotateZ(-Math.PI / 2); 
       const vinylQuat = vinylDummy.quaternion.clone();
 
-      return { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat };
+      return { coverVisualPos, vinylVisualPos, coverQuat, vinylQuat };
+  };
+
+  const getAdjustedPosition = (obj: THREE.Object3D, targetVisualPos: THREE.Vector3, targetQuat: THREE.Quaternion) => {
+      let offsetVector = new THREE.Vector3(0, 0, 0);
+
+      if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          const center = new THREE.Vector3();
+          mesh.geometry.boundingBox!.getCenter(center);
+          offsetVector.copy(center);
+      } else {
+          const box = new THREE.Box3().setFromObject(obj);
+          const center = new THREE.Vector3();
+          box.getCenter(center);
+          offsetVector.copy(obj.worldToLocal(center));
+      }
+
+      // obj.scale is already set to targetScale in animateSwitch
+      offsetVector.multiply(obj.scale);
+
+      const rotatedOffset = offsetVector.clone().applyQuaternion(targetQuat);
+      return targetVisualPos.clone().sub(rotatedOffset);
   };
 
   const animateSelection = (id: number) => {
@@ -313,7 +328,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
       isTransitioningRef.current = true;
       if (controlsRef.current) controlsRef.current.enabled = false;
 
-      // 1. 상태 저장 및 Scene Attach
       [targetLP.mesh, targetLP.vinyl].forEach(obj => {
           if (obj) {
               initialStatesRef.current.set(obj, {
@@ -326,10 +340,14 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           }
       });
 
-      // 2. 타겟 계산
-      const { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat } = getTargetTransform();
+      const { coverVisualPos, vinylVisualPos, coverQuat, vinylQuat } = getTargetTransform();
+      
+      const coverTargetPos = getAdjustedPosition(targetLP.mesh, coverVisualPos, coverQuat);
+      let vinylTargetPos = new THREE.Vector3();
+      if (targetLP.vinyl) {
+          vinylTargetPos = getAdjustedPosition(targetLP.vinyl, vinylVisualPos, vinylQuat);
+      }
 
-      // 3. 카메라 타겟 state
       const startCamPos = cameraRef.current.position.clone();
       const startCamQuat = cameraRef.current.quaternion.clone();
       
@@ -353,13 +371,11 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           const progress = Math.min((Date.now() - startTime) / duration, 1);
           const ease = 1 - Math.pow(1 - progress, 4);
 
-          // A. Camera Animation
           if (cameraRef.current) {
               cameraRef.current.position.lerpVectors(startCamPos, FOCUS_CAMERA_POS, ease);
               cameraRef.current.quaternion.slerpQuaternions(startCamQuat, endCamQuat, ease);
           }
 
-          // B. Wrapper Animation (Hide)
           if (modelWrapperRef.current) {
               const currentScale = wrapperStartScale * (1 - ease);
               modelWrapperRef.current.scale.setScalar(currentScale);
@@ -367,7 +383,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
               if (progress > 0.95) modelWrapperRef.current.visible = false;
           }
 
-          // C. LP Animation
           targetLP.mesh.position.lerpVectors(startState.meshPos, coverTargetPos, ease);
           targetLP.mesh.quaternion.slerpQuaternions(startState.meshQuat, coverQuat, ease);
           
@@ -428,13 +443,11 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           const progress = Math.min((Date.now() - startTime) / duration, 1);
           const ease = 1 - Math.pow(1 - progress, 4);
 
-          // A. Camera Reset
           if (cameraRef.current) {
                cameraRef.current.position.lerpVectors(startCamPos, DEFAULT_CAMERA_POS, ease);
                cameraRef.current.quaternion.slerpQuaternions(startCamQuat, endCamQuat, ease);
           }
 
-          // B. Wrapper Reset
           if (modelWrapperRef.current) {
                modelWrapperRef.current.scale.setScalar(targetWrapperScale * ease);
                modelWrapperRef.current.position.y = -20 * (1 - ease);
@@ -442,7 +455,6 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           
           const currentWrapperScale = targetWrapperScale * ease;
 
-          // C. Object Return
           targets.forEach((obj, i) => {
                const init = initialStatesRef.current.get(obj)!;
                const start = startLocalStates[i];
@@ -477,7 +489,7 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
 
       if (!prevLP || !nextLP || !sceneRef.current) return;
       
-      // Cleanup Previous
+      // 1. Cleanup Previous
       [prevLP.mesh, prevLP.vinyl].forEach(obj => {
           if(obj) restoreObject(obj);
       });
@@ -487,7 +499,10 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           }
       });
 
-      // Setup Next
+      // 2. Setup Next
+      const meshTargetScale = nextLP.originalScale.clone().multiplyScalar(initialWrapperScaleRef.current);
+      const vinylTargetScale = (nextLP.vinylOriginalScale || new THREE.Vector3(1,1,1)).clone().multiplyScalar(initialWrapperScaleRef.current);
+
       [nextLP.mesh, nextLP.vinyl].forEach(obj => {
           if (obj) {
               initialStatesRef.current.set(obj, {
@@ -496,14 +511,40 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
                   quat: obj.quaternion.clone(),
                   scale: obj.scale.clone()
               });
-              sceneRef.current!.attach(obj);
-              obj.position.set(0, 0, 6); // Start from Z=6 (match target Z)
-              obj.scale.setScalar(0);
+              
+              // CRITICAL FIX: Use add() instead of attach()
+              // attach() attempts to preserve world transform. 
+              // Since parent (modelWrapper) is scaled to ~0, the world transform is collapsed.
+              // Inverting this collapsed matrix results in Infinity/NaN.
+              sceneRef.current!.add(obj);
+              
+              // Force visibility and set scale for calculation
+              obj.visible = true;
+              const targetScale = (obj === nextLP.vinyl) ? vinylTargetScale : meshTargetScale;
+              obj.scale.copy(targetScale);
+              obj.updateMatrixWorld(true);
           }
       });
 
-      // Targets
-      const { coverTargetPos, vinylTargetPos, coverQuat, vinylQuat } = getTargetTransform();
+      // 3. Calculate Targets (now that scale is correct in world)
+      const { coverVisualPos, vinylVisualPos, coverQuat, vinylQuat } = getTargetTransform();
+      
+      const coverTargetPos = getAdjustedPosition(nextLP.mesh, coverVisualPos, coverQuat);
+      let vinylTargetPos = new THREE.Vector3();
+      if (nextLP.vinyl) {
+          vinylTargetPos = getAdjustedPosition(nextLP.vinyl, vinylVisualPos, vinylQuat);
+      } else {
+          vinylTargetPos = vinylVisualPos.clone();
+      }
+
+      // 4. Reset to Small Scale for Pop-up Animation
+      [nextLP.mesh, nextLP.vinyl].forEach(obj => {
+          if (obj) {
+              obj.position.set(0, 0, 6);
+              obj.quaternion.set(0,0,0,1);
+              obj.scale.setScalar(0.001); 
+          }
+      });
 
       const duration = 600;
       const startTime = Date.now();
@@ -512,12 +553,14 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
           const progress = Math.min((Date.now() - startTime) / duration, 1);
           const ease = 1 - Math.pow(1 - progress, 3);
 
-          nextLP.mesh.scale.setScalar(ease);
+          // Animate Scale
+          nextLP.mesh.scale.copy(meshTargetScale).multiplyScalar(ease);
+          // Animate Position/Rotation
           nextLP.mesh.position.lerpVectors(new THREE.Vector3(0,0,6), coverTargetPos, ease);
           nextLP.mesh.quaternion.slerpQuaternions(new THREE.Quaternion(), coverQuat, ease);
 
           if (nextLP.vinyl) {
-              nextLP.vinyl.scale.setScalar(ease);
+              nextLP.vinyl.scale.copy(vinylTargetScale).multiplyScalar(ease);
               nextLP.vinyl.position.lerpVectors(new THREE.Vector3(0,0,6), vinylTargetPos, ease);
               nextLP.vinyl.quaternion.slerpQuaternions(new THREE.Quaternion(), vinylQuat, ease);
           }
@@ -535,4 +578,4 @@ const ThreeController: React.FC<ThreeControllerProps> = ({ onLPSelect, selectedI
   return <div ref={containerRef} className="fixed left-0 md:left-[50px] top-1/2 -translate-y-1/2 w-full md:w-[840px] h-full md:h-[840px] z-10 animate-slideInLeft cursor-pointer" />;
 };
 
-export default ThreeController;``
+export default ThreeController;

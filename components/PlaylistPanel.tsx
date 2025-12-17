@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Project } from '../types';
 import { PROJECTS } from '../constants';
 
@@ -12,13 +12,18 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
   const [viewMode, setViewMode] = useState<'playingNext' | 'overview'>('overview');
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
+  const triggerRef = useRef(false);
   
-  // 프로젝트 변경 시 초기화
-  useEffect(() => {
+  // State Reset Pattern: Check if project ID changed during render
+  const [lastProjectId, setLastProjectId] = useState<number | undefined>(currentProject?.id);
+
+  if (currentProject?.id !== lastProjectId) {
+    setLastProjectId(currentProject?.id);
     setViewMode('overview');
     setProgress(0);
     setIsPlaying(true);
-  }, [currentProject]);
+    triggerRef.current = false;
+  }
 
   // Playing Next를 위한 순환 리스트 생성 (현재 프로젝트 다음부터 시작)
   const orderedProjects = useMemo(() => {
@@ -47,7 +52,8 @@ const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ currentProject, onSelectP
 
   // Handle track switch when progress finishes
   useEffect(() => {
-    if (progress >= 100 && currentProject) {
+    if (progress >= 100 && currentProject && !triggerRef.current) {
+        triggerRef.current = true; // 실행 잠금
         const currentIndex = PROJECTS.findIndex(p => p.id === currentProject.id);
         if (currentIndex !== -1) {
             const nextIndex = (currentIndex + 1) % PROJECTS.length;
